@@ -35,6 +35,11 @@ void YawDamper::reset() {
     last_physical_ = 0.0;
     filtered_yaw_rate_ = 0.0;
     integrated_yaw_rate_ = 0.0;
+    trim_bias_ = 0.0;
+    trim_candidate_ = 0.0;
+    trim_candidate_yaw_abs_ = 0.0;
+    has_trim_candidate_ = false;
+    last_user_override_ = false;
     assist_offset_ = 0.0;
 }
 
@@ -75,7 +80,23 @@ YawDamperOutput YawDamper::update(const YawDamperInput& input) {
     } else if (user_override) {
         reason = "pedal override";
         integrated_yaw_rate_ = 0.0;
+        if (config_.trim_capture_enabled > 0.5 &&
+            std::abs(physical) >= config_.trim_capture_min_pedal &&
+            std::abs(filtered_yaw_rate_) <= config_.trim_capture_yaw_rate &&
+            pedal_rate <= config_.trim_capture_pedal_rate) {
+            const double yaw_abs = std::abs(filtered_yaw_rate_);
+            if (!has_trim_candidate_ || yaw_abs < trim_candidate_yaw_abs_) {
+                trim_candidate_ = clamp(physical, -config_.max_assist, config_.max_assist);
+                trim_candidate_yaw_abs_ = yaw_abs;
+                has_trim_candidate_ = true;
+            }
+        }
     } else {
+        if (last_user_override_ && has_trim_candidate_) {
+            trim_bias_ = trim_candidate_;
+            integrated_yaw_rate_ = 0.0;
+        }
+        has_trim_candidate_ = false;
         const double rate = with_deadband(filtered_yaw_rate_, config_.yaw_rate_deadband);
         if (config_.ki > 0.0 && config_.integral_limit > 0.0) {
             integrated_yaw_rate_ += rate * dt;
@@ -86,10 +107,11 @@ YawDamperOutput YawDamper::update(const YawDamperInput& input) {
             integrated_yaw_rate_ = 0.0;
         }
         target_assist = clamp(
-            -config_.assist_sign * (config_.kp * rate + integral_assist),
+            trim_bias_ - config_.assist_sign * (config_.kp * rate + integral_assist),
             -config_.max_assist,
             config_.max_assist);
     }
+    last_user_override_ = user_override;
 
     const bool reducing_magnitude = std::abs(target_assist) < std::abs(assist_offset_);
     const double fade_time = reducing_magnitude ? config_.fade_out_time : config_.fade_in_time;
@@ -100,6 +122,7 @@ YawDamperOutput YawDamper::update(const YawDamperInput& input) {
     output.final_rudder = clamp_unit(physical + assist_offset_);
     output.assist_offset = assist_offset_;
     output.integral_assist = integral_assist;
+    output.trim_bias = trim_bias_;
     output.filtered_yaw_rate = filtered_yaw_rate_;
     output.user_override = user_override;
     output.assist_active = allowed && !user_override && std::abs(assist_offset_) > 0.0001;

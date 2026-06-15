@@ -20,6 +20,7 @@ struct YawDamperOutput {
     double final_rudder = 0.0;
     double assist_offset = 0.0;
     double integral_assist = 0.0;
+    double trim_bias = 0.0;
     double filtered_yaw_rate = 0.0;
     bool user_override = false;
     bool assist_active = false;
@@ -39,6 +40,11 @@ private:
     double last_physical_ = 0.0;
     double filtered_yaw_rate_ = 0.0;
     double integrated_yaw_rate_ = 0.0;
+    double trim_bias_ = 0.0;
+    double trim_candidate_ = 0.0;
+    double trim_candidate_yaw_abs_ = 0.0;
+    bool has_trim_candidate_ = false;
+    bool last_user_override_ = false;
     double assist_offset_ = 0.0;
 };
 

@@ -57,6 +57,10 @@ void apply_key(AppConfig& cfg, const std::string& key, const std::string& value)
     else if (key == "yaw_rate_deadband") cfg.yaw_rate_deadband = parse_double(value, key);
     else if (key == "pedal_override_threshold") cfg.pedal_override_threshold = parse_double(value, key);
     else if (key == "pedal_rate_override_threshold") cfg.pedal_rate_override_threshold = parse_double(value, key);
+    else if (key == "trim_capture_enabled") cfg.trim_capture_enabled = parse_double(value, key);
+    else if (key == "trim_capture_min_pedal") cfg.trim_capture_min_pedal = parse_double(value, key);
+    else if (key == "trim_capture_yaw_rate") cfg.trim_capture_yaw_rate = parse_double(value, key);
+    else if (key == "trim_capture_pedal_rate") cfg.trim_capture_pedal_rate = parse_double(value, key);
     else if (key == "fade_in_time") cfg.fade_in_time = parse_double(value, key);
     else if (key == "fade_out_time") cfg.fade_out_time = parse_double(value, key);
     else if (key == "filter_time") cfg.filter_time = parse_double(value, key);
@@ -80,6 +84,14 @@ void validate(const AppConfig& cfg) {
         throw std::runtime_error("integral_limit must be in [0, 1]");
     }
     if (cfg.max_assist < 0.0 || cfg.max_assist > 1.0) throw std::runtime_error("max_assist must be in [0, 1]");
+    if (cfg.trim_capture_enabled < 0.0 || cfg.trim_capture_enabled > 1.0) {
+        throw std::runtime_error("trim_capture_enabled must be in [0, 1]");
+    }
+    if (cfg.trim_capture_min_pedal < 0.0 || cfg.trim_capture_min_pedal > 1.0) {
+        throw std::runtime_error("trim_capture_min_pedal must be in [0, 1]");
+    }
+    if (cfg.trim_capture_yaw_rate < 0.0) throw std::runtime_error("trim_capture_yaw_rate must be non-negative");
+    if (cfg.trim_capture_pedal_rate < 0.0) throw std::runtime_error("trim_capture_pedal_rate must be non-negative");
     if (cfg.calibration_max_assist < 0.0 || cfg.calibration_max_assist > 0.25) {
         throw std::runtime_error("calibration_max_assist must be in [0, 0.25]");
     }
@@ -149,6 +161,10 @@ void write_default_config(const std::filesystem::path& path) {
         << "yaw_rate_deadband=" << cfg.yaw_rate_deadband << "\n"
         << "pedal_override_threshold=" << cfg.pedal_override_threshold << "\n"
         << "pedal_rate_override_threshold=" << cfg.pedal_rate_override_threshold << "\n"
+        << "trim_capture_enabled=" << cfg.trim_capture_enabled << "\n"
+        << "trim_capture_min_pedal=" << cfg.trim_capture_min_pedal << "\n"
+        << "trim_capture_yaw_rate=" << cfg.trim_capture_yaw_rate << "\n"
+        << "trim_capture_pedal_rate=" << cfg.trim_capture_pedal_rate << "\n"
         << "fade_in_time=" << cfg.fade_in_time << "\n"
         << "fade_out_time=" << cfg.fade_out_time << "\n"
         << "filter_time=" << cfg.filter_time << "\n"

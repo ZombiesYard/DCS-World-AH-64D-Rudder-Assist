@@ -103,6 +103,7 @@ autorudder::AppConfig test_config() {
     cfg.ki = 0.0;
     cfg.integral_limit = 0.0;
     cfg.max_assist = 0.2;
+    cfg.trim_capture_enabled = 0.0;
     cfg.yaw_rate_deadband = 0.0;
     cfg.pedal_override_threshold = 0.12;
     cfg.pedal_rate_override_threshold = 10.0;
@@ -225,6 +226,37 @@ void test_yaw_damper_override_resets_integral() {
     expect_near(output.final_rudder, -0.5, 0.001, "manual pedal passes through after integral reset");
 }
 
+void test_yaw_damper_captures_manual_trim_on_release() {
+    autorudder::AppConfig cfg = test_config();
+    cfg.max_assist = 0.85;
+    cfg.trim_capture_enabled = 1.0;
+    cfg.trim_capture_min_pedal = 0.2;
+    cfg.trim_capture_yaw_rate = 0.02;
+    cfg.trim_capture_pedal_rate = 0.5;
+    cfg.fade_in_time = 0.0;
+    cfg.fade_out_time = 0.0;
+    autorudder::YawDamper damper(cfg);
+
+    autorudder::YawDamperInput input;
+    input.dt = 0.1;
+    input.telemetry_fresh = true;
+    input.aircraft_is_ah64 = true;
+    input.input_valid = true;
+    input.assist_enabled = true;
+
+    input.physical_rudder = -0.65;
+    input.yaw_rate_z = 0.0;
+    damper.update(input);
+    damper.update(input);
+
+    input.physical_rudder = 0.0;
+    damper.update(input);
+    const auto output = damper.update(input);
+
+    expect_near(output.trim_bias, -0.65, 0.001, "stable manual pedal is captured as trim");
+    expect_near(output.final_rudder, -0.65, 0.001, "captured trim drives centered-pedal output");
+}
+
 }  // namespace
 
 int main() {
@@ -236,6 +268,7 @@ int main() {
     test_yaw_damper_stale_or_wrong_aircraft_passes_through();
     test_yaw_damper_integrates_centered_steady_rate();
     test_yaw_damper_override_resets_integral();
+    test_yaw_damper_captures_manual_trim_on_release();
 
     if (failures != 0) {
         std::cerr << failures << " test failure(s)\n";

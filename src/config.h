@@ -23,11 +23,15 @@ struct AppConfig {
     double assist_sign = -1.0;
     double kp = 1.20;
     double ki = 0.80;
-    double integral_limit = 0.35;
-    double max_assist = 0.45;
+    double integral_limit = 0.30;
+    double max_assist = 0.85;
     double yaw_rate_deadband = 0.003;
     double pedal_override_threshold = 0.12;
     double pedal_rate_override_threshold = 1.0;
+    double trim_capture_enabled = 1.0;
+    double trim_capture_min_pedal = 0.20;
+    double trim_capture_yaw_rate = 0.025;
+    double trim_capture_pedal_rate = 0.50;
     double fade_in_time = 0.18;
     double fade_out_time = 0.12;
     double filter_time = 0.07;

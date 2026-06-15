@@ -134,6 +134,7 @@ Keep pedals centered. The app tests `assist_sign=+1` and `assist_sign=-1`, then 
 - `yaw_rate_deadband`: yaw rate ignored near zero.
 - `pedal_override_threshold`: pedal deflection where user input overrides assist.
 - `pedal_rate_override_threshold`: pedal movement speed where assist fades out.
+- `trim_capture_*`: when you manually hold a stable pedal position that nearly stops yaw, the app captures that value as the centered-pedal trim baseline after you release.
 - `fade_in_time` / `fade_out_time`: smoothing for automatic assist.
 - `filter_time`: yaw-rate low-pass filter time.
 - `stale_timeout`: disables assist if DCS-BIOS stops updating.

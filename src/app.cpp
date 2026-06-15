@@ -263,6 +263,7 @@ int run_normal(CliOptions options, AppConfig cfg) {
                  << " filt=" << fixed3(result.filtered_yaw_rate)
                  << " assist=" << fixed3(result.assist_offset)
                  << " hold=" << fixed3(result.integral_assist)
+                 << " trim=" << fixed3(result.trim_bias)
                  << " final=" << fixed3(result.final_rudder)
                  << " mode=" << result.reason;
             if (telemetry.slip_ball) {
