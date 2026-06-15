@@ -20,8 +20,10 @@ struct AppConfig {
     std::string input_device_name_contains = "vJoy";
     std::string axis_name = "X";
 
-    double assist_sign = 1.0;
+    double assist_sign = -1.0;
     double kp = 1.20;
+    double ki = 0.80;
+    double integral_limit = 0.35;
     double max_assist = 0.45;
     double yaw_rate_deadband = 0.003;
     double pedal_override_threshold = 0.12;

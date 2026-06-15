@@ -34,6 +34,7 @@ void YawDamper::reset() {
     has_last_physical_ = false;
     last_physical_ = 0.0;
     filtered_yaw_rate_ = 0.0;
+    integrated_yaw_rate_ = 0.0;
     assist_offset_ = 0.0;
 }
 
@@ -63,18 +64,29 @@ YawDamperOutput YawDamper::update(const YawDamperInput& input) {
         input.assist_enabled;
 
     double target_assist = 0.0;
+    double integral_assist = 0.0;
     std::string reason = "assist";
     if (!allowed) {
         if (!input.telemetry_fresh) reason = "stale telemetry";
         else if (!input.aircraft_is_ah64) reason = "not AH-64D";
         else if (!input.input_valid) reason = "input invalid";
         else reason = "disabled";
+        integrated_yaw_rate_ = 0.0;
     } else if (user_override) {
         reason = "pedal override";
+        integrated_yaw_rate_ = 0.0;
     } else {
         const double rate = with_deadband(filtered_yaw_rate_, config_.yaw_rate_deadband);
+        if (config_.ki > 0.0 && config_.integral_limit > 0.0) {
+            integrated_yaw_rate_ += rate * dt;
+            const double state_limit = config_.integral_limit / config_.ki;
+            integrated_yaw_rate_ = clamp(integrated_yaw_rate_, -state_limit, state_limit);
+            integral_assist = config_.ki * integrated_yaw_rate_;
+        } else {
+            integrated_yaw_rate_ = 0.0;
+        }
         target_assist = clamp(
-            -config_.assist_sign * config_.kp * rate,
+            -config_.assist_sign * (config_.kp * rate + integral_assist),
             -config_.max_assist,
             config_.max_assist);
     }
@@ -87,6 +99,7 @@ YawDamperOutput YawDamper::update(const YawDamperInput& input) {
     YawDamperOutput output;
     output.final_rudder = clamp_unit(physical + assist_offset_);
     output.assist_offset = assist_offset_;
+    output.integral_assist = integral_assist;
     output.filtered_yaw_rate = filtered_yaw_rate_;
     output.user_override = user_override;
     output.assist_active = allowed && !user_override && std::abs(assist_offset_) > 0.0001;

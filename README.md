@@ -126,8 +126,10 @@ Keep pedals centered. The app tests `assist_sign=+1` and `assist_sign=-1`, then 
 
 ## Main Tuning Fields
 
-- `assist_sign`: flip between `1` and `-1` if correction makes yaw worse.
+- `assist_sign`: flip between `1` and `-1` if correction makes yaw worse. The default is `-1` for the observed T300/UCR/vJoy direction where left pedal is negative.
 - `kp`: yaw-rate correction strength.
+- `ki`: centered-pedal heading hold strength, built from accumulated yaw rate.
+- `integral_limit`: maximum steady hold contribution from `ki`.
 - `max_assist`: maximum automatic rudder offset.
 - `yaw_rate_deadband`: yaw rate ignored near zero.
 - `pedal_override_threshold`: pedal deflection where user input overrides assist.
@@ -136,7 +138,7 @@ Keep pedals centered. The app tests `assist_sign=+1` and `assist_sign=-1`, then 
 - `filter_time`: yaw-rate low-pass filter time.
 - `stale_timeout`: disables assist if DCS-BIOS stops updating.
 
-The shipped defaults are medium authority for the AH-64D fast export path. If the correction is still too weak, raise `kp` in 0.2 steps; if it hunts or oscillates, lower `kp` first. If yaw gets worse immediately, flip `assist_sign` before increasing authority.
+The shipped defaults are medium authority for the AH-64D fast export path. If correction direction is wrong, flip `assist_sign` before increasing authority. If it hunts or oscillates, lower `ki` first, then lower `kp`.
 
 ## Tests
 

@@ -51,6 +51,8 @@ void apply_key(AppConfig& cfg, const std::string& key, const std::string& value)
     else if (key == "axis_name") cfg.axis_name = value;
     else if (key == "assist_sign") cfg.assist_sign = parse_double(value, key);
     else if (key == "kp") cfg.kp = parse_double(value, key);
+    else if (key == "ki") cfg.ki = parse_double(value, key);
+    else if (key == "integral_limit") cfg.integral_limit = parse_double(value, key);
     else if (key == "max_assist") cfg.max_assist = parse_double(value, key);
     else if (key == "yaw_rate_deadband") cfg.yaw_rate_deadband = parse_double(value, key);
     else if (key == "pedal_override_threshold") cfg.pedal_override_threshold = parse_double(value, key);
@@ -73,6 +75,10 @@ void validate(const AppConfig& cfg) {
     }
     if (cfg.input_vjoy_id <= 0 || cfg.output_vjoy_id <= 0) throw std::runtime_error("vJoy IDs must be positive");
     if (cfg.loop_hz < 20 || cfg.loop_hz > 500) throw std::runtime_error("loop_hz must be between 20 and 500");
+    if (cfg.ki < 0.0) throw std::runtime_error("ki must be non-negative");
+    if (cfg.integral_limit < 0.0 || cfg.integral_limit > 1.0) {
+        throw std::runtime_error("integral_limit must be in [0, 1]");
+    }
     if (cfg.max_assist < 0.0 || cfg.max_assist > 1.0) throw std::runtime_error("max_assist must be in [0, 1]");
     if (cfg.calibration_max_assist < 0.0 || cfg.calibration_max_assist > 0.25) {
         throw std::runtime_error("calibration_max_assist must be in [0, 0.25]");
@@ -137,6 +143,8 @@ void write_default_config(const std::filesystem::path& path) {
         << "axis_name=" << cfg.axis_name << "\n\n"
         << "assist_sign=" << cfg.assist_sign << "\n"
         << "kp=" << cfg.kp << "\n"
+        << "ki=" << cfg.ki << "\n"
+        << "integral_limit=" << cfg.integral_limit << "\n"
         << "max_assist=" << cfg.max_assist << "\n"
         << "yaw_rate_deadband=" << cfg.yaw_rate_deadband << "\n"
         << "pedal_override_threshold=" << cfg.pedal_override_threshold << "\n"

@@ -98,7 +98,10 @@ void test_ref_extraction() {
 
 autorudder::AppConfig test_config() {
     autorudder::AppConfig cfg;
+    cfg.assist_sign = 1.0;
     cfg.kp = 0.5;
+    cfg.ki = 0.0;
+    cfg.integral_limit = 0.0;
     cfg.max_assist = 0.2;
     cfg.yaw_rate_deadband = 0.0;
     cfg.pedal_override_threshold = 0.12;
@@ -165,6 +168,63 @@ void test_yaw_damper_stale_or_wrong_aircraft_passes_through() {
     expect_near(output.assist_offset, 0.0, 0.001, "stale telemetry has no assist");
 }
 
+void test_yaw_damper_integrates_centered_steady_rate() {
+    autorudder::AppConfig cfg = test_config();
+    cfg.assist_sign = -1.0;
+    cfg.kp = 0.0;
+    cfg.ki = 1.0;
+    cfg.integral_limit = 0.3;
+    cfg.max_assist = 0.5;
+    autorudder::YawDamper damper(cfg);
+
+    autorudder::YawDamperInput input;
+    input.dt = 0.1;
+    input.physical_rudder = 0.0;
+    input.yaw_rate_z = -0.1;
+    input.telemetry_fresh = true;
+    input.aircraft_is_ah64 = true;
+    input.input_valid = true;
+    input.assist_enabled = true;
+
+    autorudder::YawDamperOutput output;
+    for (int i = 0; i < 50; ++i) {
+        output = damper.update(input);
+    }
+    expect_true(output.integral_assist < -0.25, "steady yaw rate builds hold assist");
+    expect_true(output.final_rudder < -0.25, "integral assist contributes to final rudder");
+}
+
+void test_yaw_damper_override_resets_integral() {
+    autorudder::AppConfig cfg = test_config();
+    cfg.assist_sign = -1.0;
+    cfg.kp = 0.0;
+    cfg.ki = 1.0;
+    cfg.integral_limit = 0.3;
+    cfg.max_assist = 0.5;
+    autorudder::YawDamper damper(cfg);
+
+    autorudder::YawDamperInput input;
+    input.dt = 0.1;
+    input.physical_rudder = 0.0;
+    input.yaw_rate_z = -0.1;
+    input.telemetry_fresh = true;
+    input.aircraft_is_ah64 = true;
+    input.input_valid = true;
+    input.assist_enabled = true;
+    for (int i = 0; i < 20; ++i) {
+        damper.update(input);
+    }
+
+    input.physical_rudder = -0.5;
+    autorudder::YawDamperOutput output;
+    for (int i = 0; i < 10; ++i) {
+        output = damper.update(input);
+    }
+    expect_true(output.user_override, "manual pedal still overrides with integral enabled");
+    expect_near(output.integral_assist, 0.0, 0.001, "manual pedal clears hold integral");
+    expect_near(output.final_rudder, -0.5, 0.001, "manual pedal passes through after integral reset");
+}
+
 }  // namespace
 
 int main() {
@@ -174,6 +234,8 @@ int main() {
     test_yaw_damper_assists_centered_pedals();
     test_yaw_damper_user_override();
     test_yaw_damper_stale_or_wrong_aircraft_passes_through();
+    test_yaw_damper_integrates_centered_steady_rate();
+    test_yaw_damper_override_resets_integral();
 
     if (failures != 0) {
         std::cerr << failures << " test failure(s)\n";
