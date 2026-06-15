@@ -98,6 +98,14 @@ With DCS in the AH-64D, confirm the log shows:
 - pedal values changing when you move the pedals
 - `yawZ` changing when the helicopter yaws
 
+Before flying, verify the output vJoy binding:
+
+```powershell
+.\build\Release\ah64d_auto_rudder.exe --test-output
+```
+
+This sweeps `output_vjoy_id` / `axis_name` continuously. In DCS, bind AH-64D rudder to the vJoy column/axis that moves during this test. If RCtrl+Enter or the DCS axis setup does not show movement, the rudder binding is on the wrong device/axis.
+
 ## Normal Run
 
 ```powershell

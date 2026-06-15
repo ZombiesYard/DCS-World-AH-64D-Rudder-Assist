@@ -47,6 +47,7 @@ struct CliOptions {
     bool dry_run = false;
     bool list_devices = false;
     bool calibrate_sign = false;
+    bool test_output = false;
     bool help = false;
 };
 
@@ -57,6 +58,7 @@ void print_help() {
         << "  --list-devices    Print DirectInput and vJoy devices, then exit.\n"
         << "  --dry-run         Decode DCS-BIOS and pedals without writing vJoy.\n"
         << "  --calibrate-sign  Run a low-authority sign comparison on vJoy output.\n"
+        << "  --test-output     Sweep the configured output vJoy axis for binding diagnostics.\n"
         << "  --config PATH     Use another config.ini path.\n"
         << "  --help            Print this help.\n";
 }
@@ -73,6 +75,8 @@ CliOptions parse_args(const std::vector<std::string>& args) {
             options.list_devices = true;
         } else if (arg == "--calibrate-sign") {
             options.calibrate_sign = true;
+        } else if (arg == "--test-output") {
+            options.test_output = true;
         } else if (arg == "--config") {
             if (i + 1 >= args.size()) {
                 throw std::runtime_error("--config requires a path");
@@ -351,6 +355,33 @@ int run_calibration(AppConfig cfg) {
     return 0;
 }
 
+int run_test_output(AppConfig cfg) {
+    Logger logger(cfg.log_path);
+    windows::VJoyDevice output(cfg.output_vjoy_id, cfg.axis_name);
+    logger.info("Sweeping vJoy #" + std::to_string(cfg.output_vjoy_id) + " axis " + cfg.axis_name + " for diagnostics");
+    logger.info("Open DCS axis controls or RCtrl+Enter. Stop with Ctrl+C.");
+
+    const auto started = std::chrono::steady_clock::now();
+    auto next_log = started;
+    constexpr double pi = 3.14159265358979323846;
+    while (g_running) {
+        const auto now = std::chrono::steady_clock::now();
+        const double t = std::chrono::duration<double>(now - started).count();
+        const double value = 0.80 * std::sin(2.0 * pi * 0.20 * t);
+        output.set_axis(value);
+
+        if (now >= next_log) {
+            logger.info("test_output final=" + fixed3(value));
+            next_log = now + std::chrono::milliseconds(500);
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+
+    output.set_axis(0.0);
+    logger.info("Stopped test output");
+    return 0;
+}
+
 }  // namespace
 
 int run_app(const std::vector<std::string>& args) {
@@ -372,6 +403,9 @@ int run_app(const std::vector<std::string>& args) {
         }
         AppConfig cfg = load_config(options.config_path);
 
+        if (options.test_output) {
+            return run_test_output(std::move(cfg));
+        }
         if (options.calibrate_sign) {
             return run_calibration(std::move(cfg));
         }
