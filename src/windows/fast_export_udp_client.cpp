@@ -50,6 +50,9 @@ std::optional<FastExportTelemetry> parse_line(const std::string& line) {
     try {
         telemetry.yaw_rate_z = std::stod(fields[3]);
         telemetry.slip_ball = std::stod(fields[4]);
+        if (fields.size() >= 6 && !fields[5].empty()) {
+            telemetry.collective = std::stod(fields[5]);
+        }
     } catch (const std::exception&) {
         return std::nullopt;
     }

@@ -40,6 +40,34 @@ local function safe_number(value)
     return value
 end
 
+local function find_collective()
+    local fm = LoGetHelicopterFMData and LoGetHelicopterFMData() or nil
+    if not fm then
+        return nil
+    end
+
+    local direct_keys = {
+        "collective",
+        "Collective",
+        "collective_position",
+        "collectivePosition",
+        "mainRotorCollective",
+        "main_rotor_collective",
+    }
+    for _, key in ipairs(direct_keys) do
+        if type(fm[key]) == "number" then
+            return fm[key]
+        end
+    end
+
+    for key, value in pairs(fm) do
+        if type(value) == "number" and string.find(string.lower(tostring(key)), "collect") then
+            return value
+        end
+    end
+    return nil
+end
+
 local function export_frame()
     if not ensure_socket() then
         return
@@ -64,8 +92,15 @@ local function export_frame()
     local angular = LoGetAngularVelocity and LoGetAngularVelocity() or nil
     local yaw_z = angular and safe_number(angular.z) or 0
     local slip = LoGetSlipBallPosition and safe_number(LoGetSlipBallPosition()) or 0
+    local collective = find_collective()
+    local collective_text = ""
+    if collective ~= nil then
+        if collective < 0 then collective = 0 end
+        if collective > 1 then collective = 1 end
+        collective_text = string.format("%.8f", collective)
+    end
 
-    AutoRudderExport.udp:send(string.format("AR1,%.3f,%s,%.8f,%.8f\n", now, aircraft, yaw_z, slip))
+    AutoRudderExport.udp:send(string.format("AR1,%.3f,%s,%.8f,%.8f,%s\n", now, aircraft, yaw_z, slip, collective_text))
 end
 
 local previous_after_next_frame = LuaExportAfterNextFrame

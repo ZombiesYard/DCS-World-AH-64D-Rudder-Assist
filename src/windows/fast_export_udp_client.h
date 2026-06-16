@@ -12,6 +12,7 @@ struct FastExportTelemetry {
     std::string aircraft_name;
     double yaw_rate_z = 0.0;
     std::optional<double> slip_ball;
+    std::optional<double> collective;
 };
 
 class FastExportUdpClient {

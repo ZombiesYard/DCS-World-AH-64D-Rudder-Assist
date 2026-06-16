@@ -61,6 +61,15 @@ void apply_key(AppConfig& cfg, const std::string& key, const std::string& value)
     else if (key == "trim_capture_min_pedal") cfg.trim_capture_min_pedal = parse_double(value, key);
     else if (key == "trim_capture_yaw_rate") cfg.trim_capture_yaw_rate = parse_double(value, key);
     else if (key == "trim_capture_pedal_rate") cfg.trim_capture_pedal_rate = parse_double(value, key);
+    else if (key == "collective_source") cfg.collective_source = value;
+    else if (key == "collective_input_id") cfg.collective_input_id = parse_int(value, key);
+    else if (key == "collective_device_name_contains") cfg.collective_device_name_contains = value;
+    else if (key == "collective_axis_name") cfg.collective_axis_name = value;
+    else if (key == "collective_invert") cfg.collective_invert = parse_double(value, key);
+    else if (key == "collective_sign") cfg.collective_sign = parse_double(value, key);
+    else if (key == "collective_gain") cfg.collective_gain = parse_double(value, key);
+    else if (key == "collective_rate_gain") cfg.collective_rate_gain = parse_double(value, key);
+    else if (key == "collective_rate_limit") cfg.collective_rate_limit = parse_double(value, key);
     else if (key == "fade_in_time") cfg.fade_in_time = parse_double(value, key);
     else if (key == "fade_out_time") cfg.fade_out_time = parse_double(value, key);
     else if (key == "filter_time") cfg.filter_time = parse_double(value, key);
@@ -77,7 +86,11 @@ void validate(const AppConfig& cfg) {
     if (cfg.telemetry_source != "dcs_bios" && cfg.telemetry_source != "fast_export") {
         throw std::runtime_error("telemetry_source must be dcs_bios or fast_export");
     }
+    if (cfg.collective_source != "off" && cfg.collective_source != "fast_export" && cfg.collective_source != "directinput") {
+        throw std::runtime_error("collective_source must be off, fast_export, or directinput");
+    }
     if (cfg.input_vjoy_id <= 0 || cfg.output_vjoy_id <= 0) throw std::runtime_error("vJoy IDs must be positive");
+    if (cfg.collective_input_id <= 0) throw std::runtime_error("collective_input_id must be positive");
     if (cfg.loop_hz < 20 || cfg.loop_hz > 500) throw std::runtime_error("loop_hz must be between 20 and 500");
     if (cfg.ki < 0.0) throw std::runtime_error("ki must be non-negative");
     if (cfg.integral_limit < 0.0 || cfg.integral_limit > 1.0) {
@@ -92,6 +105,14 @@ void validate(const AppConfig& cfg) {
     }
     if (cfg.trim_capture_yaw_rate < 0.0) throw std::runtime_error("trim_capture_yaw_rate must be non-negative");
     if (cfg.trim_capture_pedal_rate < 0.0) throw std::runtime_error("trim_capture_pedal_rate must be non-negative");
+    if (cfg.collective_invert < 0.0 || cfg.collective_invert > 1.0) {
+        throw std::runtime_error("collective_invert must be in [0, 1]");
+    }
+    if (cfg.collective_gain < 0.0) throw std::runtime_error("collective_gain must be non-negative");
+    if (cfg.collective_rate_gain < 0.0) throw std::runtime_error("collective_rate_gain must be non-negative");
+    if (cfg.collective_rate_limit < 0.0 || cfg.collective_rate_limit > 1.0) {
+        throw std::runtime_error("collective_rate_limit must be in [0, 1]");
+    }
     if (cfg.calibration_max_assist < 0.0 || cfg.calibration_max_assist > 0.25) {
         throw std::runtime_error("calibration_max_assist must be in [0, 0.25]");
     }
@@ -165,6 +186,15 @@ void write_default_config(const std::filesystem::path& path) {
         << "trim_capture_min_pedal=" << cfg.trim_capture_min_pedal << "\n"
         << "trim_capture_yaw_rate=" << cfg.trim_capture_yaw_rate << "\n"
         << "trim_capture_pedal_rate=" << cfg.trim_capture_pedal_rate << "\n"
+        << "collective_source=" << cfg.collective_source << "\n"
+        << "collective_input_id=" << cfg.collective_input_id << "\n"
+        << "collective_device_name_contains=" << cfg.collective_device_name_contains << "\n"
+        << "collective_axis_name=" << cfg.collective_axis_name << "\n"
+        << "collective_invert=" << cfg.collective_invert << "\n"
+        << "collective_sign=" << cfg.collective_sign << "\n"
+        << "collective_gain=" << cfg.collective_gain << "\n"
+        << "collective_rate_gain=" << cfg.collective_rate_gain << "\n"
+        << "collective_rate_limit=" << cfg.collective_rate_limit << "\n"
         << "fade_in_time=" << cfg.fade_in_time << "\n"
         << "fade_out_time=" << cfg.fade_out_time << "\n"
         << "filter_time=" << cfg.filter_time << "\n"

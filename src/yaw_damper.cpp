@@ -40,12 +40,15 @@ void YawDamper::reset() {
     trim_candidate_yaw_abs_ = 0.0;
     has_trim_candidate_ = false;
     last_user_override_ = false;
+    has_last_collective_ = false;
+    last_collective_ = 0.0;
     assist_offset_ = 0.0;
 }
 
 YawDamperOutput YawDamper::update(const YawDamperInput& input) {
     const double dt = clamp(input.dt, 0.001, 0.2);
     const double physical = clamp_unit(input.physical_rudder);
+    const double collective = clamp(input.collective, 0.0, 1.0);
 
     if (config_.filter_time <= 0.0) {
         filtered_yaw_rate_ = input.yaw_rate_z;
@@ -68,6 +71,24 @@ YawDamperOutput YawDamper::update(const YawDamperInput& input) {
         input.input_valid &&
         input.assist_enabled;
 
+    double collective_rate = 0.0;
+    double collective_feedforward = 0.0;
+    if (allowed && input.collective_valid) {
+        collective_rate = has_last_collective_ ? (collective - last_collective_) / dt : 0.0;
+        has_last_collective_ = true;
+        last_collective_ = collective;
+        const double rate_term = clamp(
+            config_.collective_sign * config_.collective_rate_gain * collective_rate,
+            -config_.collective_rate_limit,
+            config_.collective_rate_limit);
+        collective_feedforward = clamp(
+            config_.collective_sign * config_.collective_gain * collective + rate_term,
+            -config_.max_assist,
+            config_.max_assist);
+    } else {
+        has_last_collective_ = false;
+    }
+
     double target_assist = 0.0;
     double integral_assist = 0.0;
     std::string reason = "assist";
@@ -86,7 +107,7 @@ YawDamperOutput YawDamper::update(const YawDamperInput& input) {
             pedal_rate <= config_.trim_capture_pedal_rate) {
             const double yaw_abs = std::abs(filtered_yaw_rate_);
             if (!has_trim_candidate_ || yaw_abs < trim_candidate_yaw_abs_) {
-                trim_candidate_ = clamp(physical, -config_.max_assist, config_.max_assist);
+                trim_candidate_ = clamp(physical - collective_feedforward, -config_.max_assist, config_.max_assist);
                 trim_candidate_yaw_abs_ = yaw_abs;
                 has_trim_candidate_ = true;
             }
@@ -107,7 +128,7 @@ YawDamperOutput YawDamper::update(const YawDamperInput& input) {
             integrated_yaw_rate_ = 0.0;
         }
         target_assist = clamp(
-            trim_bias_ - config_.assist_sign * (config_.kp * rate + integral_assist),
+            collective_feedforward + trim_bias_ - config_.assist_sign * (config_.kp * rate + integral_assist),
             -config_.max_assist,
             config_.max_assist);
     }
@@ -123,6 +144,9 @@ YawDamperOutput YawDamper::update(const YawDamperInput& input) {
     output.assist_offset = assist_offset_;
     output.integral_assist = integral_assist;
     output.trim_bias = trim_bias_;
+    output.collective_feedforward = collective_feedforward;
+    output.collective = collective;
+    output.collective_rate = collective_rate;
     output.filtered_yaw_rate = filtered_yaw_rate_;
     output.user_override = user_override;
     output.assist_active = allowed && !user_override && std::abs(assist_offset_) > 0.0001;

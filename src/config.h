@@ -32,6 +32,15 @@ struct AppConfig {
     double trim_capture_min_pedal = 0.20;
     double trim_capture_yaw_rate = 0.025;
     double trim_capture_pedal_rate = 0.50;
+    std::string collective_source = "fast_export";
+    int collective_input_id = 1;
+    std::string collective_device_name_contains;
+    std::string collective_axis_name = "Z";
+    double collective_invert = 0.0;
+    double collective_sign = -1.0;
+    double collective_gain = 0.70;
+    double collective_rate_gain = 0.20;
+    double collective_rate_limit = 0.25;
     double fade_in_time = 0.18;
     double fade_out_time = 0.12;
     double filter_time = 0.07;

@@ -257,6 +257,70 @@ void test_yaw_damper_captures_manual_trim_on_release() {
     expect_near(output.final_rudder, -0.65, 0.001, "captured trim drives centered-pedal output");
 }
 
+void test_yaw_damper_collective_feedforward() {
+    autorudder::AppConfig cfg = test_config();
+    cfg.assist_sign = -1.0;
+    cfg.max_assist = 0.85;
+    cfg.collective_sign = -1.0;
+    cfg.collective_gain = 0.70;
+    cfg.collective_rate_gain = 0.0;
+    cfg.fade_in_time = 0.0;
+    cfg.fade_out_time = 0.0;
+    autorudder::YawDamper damper(cfg);
+
+    autorudder::YawDamperInput input;
+    input.dt = 0.1;
+    input.physical_rudder = 0.0;
+    input.yaw_rate_z = 0.0;
+    input.collective = 0.60;
+    input.collective_valid = true;
+    input.telemetry_fresh = true;
+    input.aircraft_is_ah64 = true;
+    input.input_valid = true;
+    input.assist_enabled = true;
+
+    const auto output = damper.update(input);
+    expect_near(output.collective_feedforward, -0.42, 0.001, "collective feedforward commands left rudder");
+    expect_near(output.final_rudder, -0.42, 0.001, "collective feedforward reaches final rudder");
+}
+
+void test_yaw_damper_trim_capture_subtracts_collective_feedforward() {
+    autorudder::AppConfig cfg = test_config();
+    cfg.max_assist = 0.85;
+    cfg.collective_sign = -1.0;
+    cfg.collective_gain = 0.40;
+    cfg.collective_rate_gain = 0.0;
+    cfg.trim_capture_enabled = 1.0;
+    cfg.trim_capture_min_pedal = 0.2;
+    cfg.trim_capture_yaw_rate = 0.02;
+    cfg.trim_capture_pedal_rate = 0.5;
+    cfg.fade_in_time = 0.0;
+    cfg.fade_out_time = 0.0;
+    autorudder::YawDamper damper(cfg);
+
+    autorudder::YawDamperInput input;
+    input.dt = 0.1;
+    input.collective = 0.50;
+    input.collective_valid = true;
+    input.telemetry_fresh = true;
+    input.aircraft_is_ah64 = true;
+    input.input_valid = true;
+    input.assist_enabled = true;
+
+    input.physical_rudder = -0.65;
+    input.yaw_rate_z = 0.0;
+    damper.update(input);
+    damper.update(input);
+
+    input.physical_rudder = 0.0;
+    damper.update(input);
+    const auto output = damper.update(input);
+
+    expect_near(output.collective_feedforward, -0.20, 0.001, "collective feedforward remains active");
+    expect_near(output.trim_bias, -0.45, 0.001, "captured trim stores only the remaining rudder");
+    expect_near(output.final_rudder, -0.65, 0.001, "feedforward plus trim reproduces manual rudder");
+}
+
 }  // namespace
 
 int main() {
@@ -269,6 +333,8 @@ int main() {
     test_yaw_damper_integrates_centered_steady_rate();
     test_yaw_damper_override_resets_integral();
     test_yaw_damper_captures_manual_trim_on_release();
+    test_yaw_damper_collective_feedforward();
+    test_yaw_damper_trim_capture_subtracts_collective_feedforward();
 
     if (failures != 0) {
         std::cerr << failures << " test failure(s)\n";

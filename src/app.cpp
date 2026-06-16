@@ -113,6 +113,7 @@ struct Telemetry {
     bool aircraft_is_ah64 = false;
     double yaw_rate_z = 0.0;
     std::optional<double> slip_ball;
+    std::optional<double> collective;
 };
 
 struct TelemetrySample {
@@ -172,6 +173,7 @@ struct Runtime {
     windows::DcsBiosUdpClient bios;
     std::optional<windows::FastExportUdpClient> fast_export;
     windows::DirectInputAxisInput pedals;
+    std::optional<windows::DirectInputAxisInput> collective_input;
 
     Runtime(AppConfig config)
         : cfg(std::move(config)),
@@ -183,8 +185,39 @@ struct Runtime {
         if (cfg.telemetry_source == "fast_export") {
             fast_export.emplace(cfg.fast_export_bind_address, cfg.fast_export_port);
         }
+        if (cfg.collective_source == "directinput") {
+            collective_input.emplace(cfg.collective_input_id, cfg.collective_device_name_contains, cfg.collective_axis_name);
+        }
     }
 };
+
+double clamp01(double value) {
+    return std::max(0.0, std::min(1.0, value));
+}
+
+double directinput_axis_to_collective(double raw_axis, const AppConfig& cfg) {
+    double value = (raw_axis + 1.0) * 0.5;
+    if (cfg.collective_invert > 0.5) {
+        value = 1.0 - value;
+    }
+    return clamp01(value);
+}
+
+std::optional<double> read_collective(Runtime& runtime, const Telemetry& telemetry) {
+    if (runtime.cfg.collective_source == "directinput") {
+        if (!runtime.collective_input) {
+            return std::nullopt;
+        }
+        if (const auto raw = runtime.collective_input->read()) {
+            return directinput_axis_to_collective(*raw, runtime.cfg);
+        }
+        return std::nullopt;
+    }
+    if (runtime.cfg.collective_source == "fast_export") {
+        return telemetry.collective;
+    }
+    return std::nullopt;
+}
 
 TelemetrySample sample_telemetry(Runtime& runtime) {
     runtime.bios.pump();
@@ -196,6 +229,7 @@ TelemetrySample sample_telemetry(Runtime& runtime) {
             sample.telemetry.aircraft_is_ah64 = is_ah64(latest->aircraft_name);
             sample.telemetry.yaw_rate_z = latest->yaw_rate_z;
             sample.telemetry.slip_ball = latest->slip_ball;
+            sample.telemetry.collective = latest->collective;
         }
         sample.fresh = runtime.fast_export->has_recent_frame(runtime.cfg.stale_timeout);
         return sample;
@@ -216,6 +250,11 @@ int run_normal(CliOptions options, AppConfig cfg) {
     }
 
     runtime.logger.info("Selected pedal input: " + runtime.pedals.selected_name());
+    if (runtime.collective_input) {
+        runtime.logger.info("Selected collective input: " + runtime.collective_input->selected_name());
+    } else {
+        runtime.logger.info("Collective source: " + runtime.cfg.collective_source);
+    }
     runtime.logger.info("Telemetry source: " + runtime.cfg.telemetry_source);
     runtime.logger.info(options.dry_run ? "Running in dry-run mode" : "Writing final rudder to vJoy #" + std::to_string(runtime.cfg.output_vjoy_id));
     runtime.logger.info("Press " + hotkey.name() + " to toggle assist; Ctrl+C to exit.");
@@ -239,16 +278,19 @@ int run_normal(CliOptions options, AppConfig cfg) {
         const auto pedal = runtime.pedals.read();
         const TelemetrySample sample = sample_telemetry(runtime);
         const Telemetry& telemetry = sample.telemetry;
+        const auto collective = read_collective(runtime, telemetry);
 
-        const auto result = damper.update(YawDamperInput{
-            dt,
-            pedal.value_or(0.0),
-            telemetry.yaw_rate_z,
-            sample.fresh,
-            telemetry.aircraft_is_ah64,
-            pedal.has_value(),
-            assist_enabled,
-        });
+        YawDamperInput damper_input;
+        damper_input.dt = dt;
+        damper_input.physical_rudder = pedal.value_or(0.0);
+        damper_input.yaw_rate_z = telemetry.yaw_rate_z;
+        damper_input.collective = collective.value_or(0.0);
+        damper_input.collective_valid = collective.has_value();
+        damper_input.telemetry_fresh = sample.fresh;
+        damper_input.aircraft_is_ah64 = telemetry.aircraft_is_ah64;
+        damper_input.input_valid = pedal.has_value();
+        damper_input.assist_enabled = assist_enabled;
+        const auto result = damper.update(damper_input);
 
         if (output) {
             output->set_axis(result.final_rudder);
@@ -260,6 +302,9 @@ int run_normal(CliOptions options, AppConfig cfg) {
                  << " fresh=" << (sample.fresh ? "yes" : "no")
                  << " pedal=" << fixed3(pedal.value_or(0.0))
                  << " yawZ=" << fixed3(telemetry.yaw_rate_z)
+                 << " coll=" << (collective ? fixed3(*collective) : "NA")
+                 << " cdot=" << fixed3(result.collective_rate)
+                 << " cff=" << fixed3(result.collective_feedforward)
                  << " filt=" << fixed3(result.filtered_yaw_rate)
                  << " assist=" << fixed3(result.assist_offset)
                  << " hold=" << fixed3(result.integral_assist)
@@ -310,15 +355,18 @@ double run_calibration_phase(Runtime& runtime, windows::VJoyDevice& output, doub
         const auto pedal = runtime.pedals.read();
         const TelemetrySample sample = sample_telemetry(runtime);
         const Telemetry& telemetry = sample.telemetry;
-        const auto result = damper.update(YawDamperInput{
-            dt,
-            pedal.value_or(0.0),
-            telemetry.yaw_rate_z,
-            sample.fresh,
-            telemetry.aircraft_is_ah64,
-            pedal.has_value(),
-            true,
-        });
+        const auto collective = read_collective(runtime, telemetry);
+        YawDamperInput damper_input;
+        damper_input.dt = dt;
+        damper_input.physical_rudder = pedal.value_or(0.0);
+        damper_input.yaw_rate_z = telemetry.yaw_rate_z;
+        damper_input.collective = collective.value_or(0.0);
+        damper_input.collective_valid = collective.has_value();
+        damper_input.telemetry_fresh = sample.fresh;
+        damper_input.aircraft_is_ah64 = telemetry.aircraft_is_ah64;
+        damper_input.input_valid = pedal.has_value();
+        damper_input.assist_enabled = true;
+        const auto result = damper.update(damper_input);
         output.set_axis(result.final_rudder);
 
         if (elapsed > 2.0 && sample.fresh && telemetry.aircraft_is_ah64 && !result.user_override) {
