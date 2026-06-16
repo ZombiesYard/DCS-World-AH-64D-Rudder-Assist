@@ -65,6 +65,7 @@ void YawDamper::reset() {
     has_last_heading_ = false;
     last_heading_ = 0.0;
     filtered_heading_rate_ = 0.0;
+    release_brake_timer_ = 0.0;
 }
 
 YawDamperOutput YawDamper::update(const YawDamperInput& input) {
@@ -147,6 +148,7 @@ YawDamperOutput YawDamper::update(const YawDamperInput& input) {
         has_heading_ref_ = false;
         pedal_command_active_ = false;
         has_last_heading_ = false;
+        release_brake_timer_ = 0.0;
     } else if (!heading_mode && user_override) {
         reason = "pedal override";
         integrated_yaw_rate_ = 0.0;
@@ -169,6 +171,7 @@ YawDamperOutput YawDamper::update(const YawDamperInput& input) {
         } else {
             turn_command = std::abs(physical) >= config_.pedal_command_deadzone;
         }
+        const bool released_turn_command = pedal_command_active_ && !turn_command;
 
         if (turn_command) {
             const double command_axis = signed_curve(physical);
@@ -181,6 +184,7 @@ YawDamperOutput YawDamper::update(const YawDamperInput& input) {
                 has_heading_ref_ = true;
             }
             integrated_yaw_rate_ = 0.0;
+            release_brake_timer_ = 0.0;
             reason = "turn command";
         } else if (input.heading_valid) {
             if (!has_heading_ref_) {
@@ -188,19 +192,21 @@ YawDamperOutput YawDamper::update(const YawDamperInput& input) {
                 has_heading_ref_ = true;
             }
 
-            if (pedal_command_active_) {
+            if (released_turn_command) {
                 heading_ref_ = input.heading;
                 integrated_yaw_rate_ = 0.0;
+                release_brake_timer_ = config_.release_brake_time;
             }
             heading_error = wrap_pi(heading_ref_ - input.heading);
             yaw_rate_command = clamp(
                 config_.heading_kp * heading_error,
                 -config_.heading_rate_limit,
                 config_.heading_rate_limit);
-            reason = "heading hold";
+            reason = release_brake_timer_ > 0.0 ? "release brake" : "heading hold";
         } else {
             has_heading_ref_ = false;
             integrated_yaw_rate_ = 0.0;
+            release_brake_timer_ = 0.0;
             reason = "rate hold no heading";
         }
         pedal_command_active_ = turn_command;
@@ -215,12 +221,18 @@ YawDamperOutput YawDamper::update(const YawDamperInput& input) {
             integrated_yaw_rate_ = 0.0;
         }
 
-        double feedback_assist = config_.yaw_response_sign * (config_.kp * rate_error + integral_assist);
+        const bool release_brake = !turn_command && release_brake_timer_ > 0.0;
+        const double feedback_kp = release_brake ? config_.release_brake_kp : config_.kp;
+        double feedback_assist = config_.yaw_response_sign * (feedback_kp * rate_error + integral_assist);
         if (!turn_command) {
+            const double assist_limit = release_brake ? config_.release_brake_max_assist : config_.heading_hold_max_assist;
             feedback_assist = clamp(
                 feedback_assist,
-                -config_.heading_hold_max_assist,
-                config_.heading_hold_max_assist);
+                -assist_limit,
+                assist_limit);
+        }
+        if (release_brake_timer_ > 0.0) {
+            release_brake_timer_ = std::max(0.0, release_brake_timer_ - dt);
         }
         target_assist = clamp(
             collective_feedforward + feedback_assist,

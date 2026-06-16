@@ -24,14 +24,17 @@ struct AppConfig {
     double assist_sign = -1.0;
     double yaw_response_sign = 1.0;
     double yaw_rate_sign = -1.0;
-    double kp = 1.40;
+    double kp = 1.80;
     double ki = 0.0;
     double integral_limit = 0.0;
     double max_assist = 0.85;
-    double heading_hold_max_assist = 0.35;
+    double heading_hold_max_assist = 0.50;
+    double release_brake_time = 1.50;
+    double release_brake_kp = 2.40;
+    double release_brake_max_assist = 0.70;
     double yaw_rate_deadband = 0.003;
-    double heading_kp = 0.80;
-    double heading_rate_limit = 0.18;
+    double heading_kp = 0.95;
+    double heading_rate_limit = 0.28;
     double turn_rate_max = 0.45;
     double pedal_command_sign = 1.0;
     double pedal_command_deadzone = 0.06;
@@ -51,9 +54,9 @@ struct AppConfig {
     double collective_gain = 0.70;
     double collective_rate_gain = 0.20;
     double collective_rate_limit = 0.25;
-    double fade_in_time = 0.18;
+    double fade_in_time = 0.10;
     double fade_out_time = 0.10;
-    double filter_time = 0.08;
+    double filter_time = 0.06;
     double stale_timeout = 1.00;
     int loop_hz = 100;
 
