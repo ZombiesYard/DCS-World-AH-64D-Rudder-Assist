@@ -10,6 +10,7 @@
 #include "windows/fast_export_udp_client.h"
 #include "windows/hotkey.h"
 #include "windows/vjoy_device.h"
+#include "windows/xinput_axis.h"
 #include "yaw_damper.h"
 
 #include <atomic>
@@ -105,6 +106,20 @@ std::string trim(std::string value) {
     return value;
 }
 
+std::string uppercase(std::string value) {
+    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char ch) {
+        return static_cast<char>(std::toupper(ch));
+    });
+    return value;
+}
+
+bool contains_case_insensitive(const std::string& text, const std::string& needle) {
+    if (needle.empty()) {
+        return true;
+    }
+    return uppercase(text).find(uppercase(needle)) != std::string::npos;
+}
+
 bool is_ah64(const std::string& aircraft_name) {
     return aircraft_name.find("AH-64D") != std::string::npos;
 }
@@ -181,6 +196,32 @@ void print_device_lists() {
         std::cout << '\n';
     }
 
+    std::cout << "\nXInput controllers:\n";
+    const auto xinput_devices = windows::XInputAxisInput::list_devices();
+    if (xinput_devices.empty()) {
+        std::cout << "  none\n";
+    }
+    for (const auto& device : xinput_devices) {
+        std::cout << "  [" << device.index << "] XInput controller #" << device.index
+                  << " packet=" << device.packet_number << '\n';
+        std::cout << "      axes:";
+        for (const char* axis : {"LX", "LY", "RX", "RY", "LT", "RT"}) {
+            try {
+                windows::XInputAxisInput input(device.index, axis);
+                const auto value = input.read();
+                std::cout << ' ' << axis << '=';
+                if (value) {
+                    std::cout << fixed3(*value);
+                } else {
+                    std::cout << "NA";
+                }
+            } catch (const std::exception&) {
+                std::cout << ' ' << axis << "=NA";
+            }
+        }
+        std::cout << '\n';
+    }
+
     std::cout << "\nvJoy status:\n";
     for (const auto& status : windows::VJoyDevice::list_statuses()) {
         if (status.id == 0) {
@@ -199,7 +240,8 @@ struct Runtime {
     windows::DcsBiosUdpClient bios;
     std::optional<windows::FastExportUdpClient> fast_export;
     windows::DirectInputAxisInput pedals;
-    std::optional<windows::DirectInputAxisInput> collective_input;
+    std::optional<windows::DirectInputAxisInput> collective_directinput;
+    std::optional<windows::XInputAxisInput> collective_xinput;
     std::string collective_input_error;
 
     Runtime(AppConfig config)
@@ -212,20 +254,42 @@ struct Runtime {
         if (cfg.telemetry_source == "fast_export") {
             fast_export.emplace(cfg.fast_export_bind_address, cfg.fast_export_port);
         }
+        const auto init_directinput = [&] {
+            collective_directinput.emplace(cfg.collective_input_id, cfg.collective_device_name_contains, cfg.collective_axis_name);
+        };
+        const auto init_xinput = [&] {
+            collective_xinput.emplace(cfg.collective_input_id, cfg.collective_axis_name);
+        };
+
         if (cfg.collective_source == "directinput") {
-            collective_input.emplace(cfg.collective_input_id, cfg.collective_device_name_contains, cfg.collective_axis_name);
+            init_directinput();
+        } else if (cfg.collective_source == "xinput") {
+            init_xinput();
         } else if (cfg.collective_source == "auto") {
             try {
                 if (cfg.collective_device_name_contains.empty()) {
                     collective_input_error =
-                        "collective_device_name_contains is empty; set it to your collective device name or use collective_source=directinput";
+                        "collective_device_name_contains is empty; set it to your collective device name or use collective_source=xinput/directinput";
+                } else if (contains_case_insensitive(cfg.collective_device_name_contains, "xinput") ||
+                           contains_case_insensitive(cfg.collective_device_name_contains, "xbox")) {
+                    init_xinput();
                 } else {
-                    collective_input.emplace(cfg.collective_input_id, cfg.collective_device_name_contains, cfg.collective_axis_name);
+                    init_directinput();
                 }
             } catch (const std::exception& ex) {
                 collective_input_error = ex.what();
             }
         }
+    }
+
+    std::string collective_input_name() const {
+        if (collective_xinput) {
+            return collective_xinput->selected_name();
+        }
+        if (collective_directinput) {
+            return collective_directinput->selected_name();
+        }
+        return {};
     }
 };
 
@@ -312,30 +376,47 @@ void log_tune_report(Logger& logger, const std::string& label, const TuneReport&
 }
 
 std::optional<double> read_collective(Runtime& runtime, const Telemetry& telemetry) {
-    if (runtime.cfg.collective_source == "auto") {
-        if (telemetry.collective) {
-            return telemetry.collective;
+    const auto read_configured_input = [&]() -> std::optional<double> {
+        if (runtime.collective_xinput) {
+            if (const auto raw = runtime.collective_xinput->read()) {
+                return directinput_axis_to_collective(*raw, runtime.cfg);
+            }
         }
-        if (runtime.collective_input) {
-            if (const auto raw = runtime.collective_input->read()) {
+        if (runtime.collective_directinput) {
+            if (const auto raw = runtime.collective_directinput->read()) {
                 return directinput_axis_to_collective(*raw, runtime.cfg);
             }
         }
         return std::nullopt;
+    };
+
+    if (runtime.cfg.collective_source == "auto") {
+        if (telemetry.collective) {
+            return telemetry.collective;
+        }
+        return read_configured_input();
+    }
+    if (runtime.cfg.collective_source == "xinput") {
+        return read_configured_input();
     }
     if (runtime.cfg.collective_source == "directinput") {
-        if (!runtime.collective_input) {
-            return std::nullopt;
-        }
-        if (const auto raw = runtime.collective_input->read()) {
-            return directinput_axis_to_collective(*raw, runtime.cfg);
-        }
-        return std::nullopt;
+        return read_configured_input();
     }
     if (runtime.cfg.collective_source == "fast_export") {
         return telemetry.collective;
     }
     return std::nullopt;
+}
+
+void log_collective_input(Logger& logger, const Runtime& runtime) {
+    const std::string name = runtime.collective_input_name();
+    if (!name.empty()) {
+        logger.info("Selected collective input: " + name);
+    } else if (!runtime.collective_input_error.empty()) {
+        logger.warn("Collective input unavailable: " + runtime.collective_input_error);
+    } else {
+        logger.info("Collective source: " + runtime.cfg.collective_source);
+    }
 }
 
 TelemetrySample sample_telemetry(Runtime& runtime) {
@@ -370,13 +451,7 @@ int run_normal(CliOptions options, AppConfig cfg) {
     }
 
     runtime.logger.info("Selected pedal input: " + runtime.pedals.selected_name());
-    if (runtime.collective_input) {
-        runtime.logger.info("Selected collective input: " + runtime.collective_input->selected_name());
-    } else if (!runtime.collective_input_error.empty()) {
-        runtime.logger.warn("Collective DirectInput fallback unavailable: " + runtime.collective_input_error);
-    } else {
-        runtime.logger.info("Collective source: " + runtime.cfg.collective_source);
-    }
+    log_collective_input(runtime.logger, runtime);
     runtime.logger.info("Telemetry source: " + runtime.cfg.telemetry_source);
     runtime.logger.info(options.dry_run ? "Running in dry-run mode" : "Writing final rudder to vJoy #" + std::to_string(runtime.cfg.output_vjoy_id));
     runtime.logger.info("Press " + hotkey.name() + " to toggle assist; Ctrl+C to exit.");
@@ -473,11 +548,7 @@ int run_tune_session(AppConfig cfg, bool auto_apply) {
         runtime.logger.info("Auto tune does not edit config.ini; Ctrl+C prints the final active values.");
     }
     runtime.logger.info("Active tune config: " + tune_config_summary(active_cfg));
-    if (runtime.collective_input) {
-        runtime.logger.info("Selected collective input: " + runtime.collective_input->selected_name());
-    } else if (!runtime.collective_input_error.empty()) {
-        runtime.logger.warn("Collective DirectInput fallback unavailable: " + runtime.collective_input_error);
-    }
+    log_collective_input(runtime.logger, runtime);
     runtime.logger.info("Press " + hotkey.name() + " to toggle assist; Ctrl+C to finish.");
 
     YawDamper damper(active_cfg);

@@ -103,8 +103,9 @@ void validate(const AppConfig& cfg) {
     if (cfg.collective_source != "off" &&
         cfg.collective_source != "auto" &&
         cfg.collective_source != "fast_export" &&
-        cfg.collective_source != "directinput") {
-        throw std::runtime_error("collective_source must be off, auto, fast_export, or directinput");
+        cfg.collective_source != "directinput" &&
+        cfg.collective_source != "xinput") {
+        throw std::runtime_error("collective_source must be off, auto, fast_export, directinput, or xinput");
     }
     if (cfg.control_mode != "yaw_damper" && cfg.control_mode != "heading_hold" && cfg.control_mode != "heading_command") {
         throw std::runtime_error("control_mode must be yaw_damper, heading_hold, or heading_command");

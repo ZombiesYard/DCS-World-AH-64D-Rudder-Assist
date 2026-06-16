@@ -207,7 +207,7 @@ That mode uses `final = physical_pedal + assist_offset` and fades assist out dur
 - `pedal_override_threshold`: pedal deflection where user input overrides assist in old `yaw_damper` mode.
 - `pedal_rate_override_threshold`: pedal movement speed where assist fades out.
 - `trim_capture_*`: old `yaw_damper` mode manual trim capture. Defaults off because it can store a bad bias and cause runaway in FBW use.
-- `collective_*`: collective feedforward. This is the part that reacts before yaw rate appears. Default `collective_source=auto`; it uses fast export collective if available, otherwise DirectInput only after `collective_device_name_contains` is set. If the log shows `coll=NA`, run `--list-devices` while moving the collective, then set `collective_source=directinput` or configure the auto DirectInput fallback with your physical collective device and axis.
+- `collective_*`: collective feedforward. This is the part that reacts before yaw rate appears. Default `collective_source=auto`; it uses fast export collective if available, otherwise the configured fallback. For an Xbox controller, use `collective_source=xinput` and one of `LX`, `LY`, `RX`, `RY`, `LT`, `RT`. If the log shows `coll=NA`, run `--list-devices` while moving the collective and configure the axis that changes.
 - `fade_in_time` / `fade_out_time`: smoothing for automatic assist.
 - `filter_time`: yaw-rate low-pass filter time.
 - `stale_timeout`: disables assist if DCS-BIOS stops updating.

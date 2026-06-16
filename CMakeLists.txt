@@ -34,11 +34,12 @@ if(WIN32)
         src/windows/fast_export_udp_client.cpp
         src/windows/hotkey.cpp
         src/windows/vjoy_device.cpp
+        src/windows/xinput_axis.cpp
     )
 
     target_include_directories(ah64d_auto_rudder PRIVATE src)
     target_compile_definitions(ah64d_auto_rudder PRIVATE DIRECTINPUT_VERSION=0x0800)
-    target_link_libraries(ah64d_auto_rudder PRIVATE autorudder_core ws2_32 dinput8 dxguid)
+    target_link_libraries(ah64d_auto_rudder PRIVATE autorudder_core ws2_32 dinput8 dxguid xinput)
 
     if(MSVC)
         target_compile_options(ah64d_auto_rudder PRIVATE /W4 /permissive-)
