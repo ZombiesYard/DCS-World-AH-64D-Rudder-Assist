@@ -119,17 +119,18 @@ autorudder::AppConfig heading_config() {
     cfg.control_mode = "heading_hold";
     cfg.yaw_response_sign = 1.0;
     cfg.yaw_rate_sign = -1.0;
-    cfg.kp = 1.8;
+    cfg.kp = 1.35;
     cfg.ki = 0.0;
     cfg.integral_limit = 0.0;
     cfg.max_assist = 0.85;
-    cfg.heading_hold_max_assist = 0.50;
-    cfg.release_brake_time = 1.5;
-    cfg.release_brake_kp = 2.4;
-    cfg.release_brake_max_assist = 0.70;
+    cfg.heading_hold_max_assist = 0.35;
+    cfg.release_brake_time = 1.8;
+    cfg.release_brake_kp = 3.2;
+    cfg.release_brake_max_assist = 0.85;
     cfg.yaw_rate_deadband = 0.0;
-    cfg.heading_kp = 0.95;
-    cfg.heading_rate_limit = 0.28;
+    cfg.heading_error_deadband = 0.0;
+    cfg.heading_kp = 0.75;
+    cfg.heading_rate_limit = 0.30;
     cfg.turn_rate_max = 0.45;
     cfg.pedal_command_sign = 1.0;
     cfg.pedal_command_deadzone = 0.06;
@@ -390,6 +391,7 @@ void test_heading_hold_recaptures_heading_after_turn_command() {
     auto output = damper.update(input);
     expect_true(output.yaw_rate_command > 0.10, "pedal deflection commands yaw rate");
     expect_true(output.reason == "turn command", "pedal deflection reports turn command");
+    expect_near(output.final_rudder, 0.5, 0.001, "turn command maps pedal directly to output");
 
     input.heading = 0.4;
     input.physical_rudder = 0.0;
@@ -413,7 +415,7 @@ void test_heading_hold_uses_release_brake_after_turn_command() {
 
     damper.update(input);
 
-    input.physical_rudder = 0.5;
+    input.physical_rudder = 0.1;
     input.heading = 0.1;
     damper.update(input);
 
@@ -423,7 +425,28 @@ void test_heading_hold_uses_release_brake_after_turn_command() {
 
     expect_true(output.reason == "release brake", "release from turn command enters brake mode");
     expect_true(output.final_rudder < -0.50, "release brake can exceed normal heading hold authority");
-    expect_true(output.final_rudder >= -0.70, "release brake remains authority limited");
+    expect_true(output.final_rudder >= -0.85, "release brake remains authority limited");
+}
+
+void test_heading_hold_allows_full_pedal_turn_output() {
+    autorudder::YawDamper damper(heading_config());
+    autorudder::YawDamperInput input;
+    input.dt = 0.10;
+    input.heading = 0.0;
+    input.heading_valid = true;
+    input.telemetry_fresh = true;
+    input.aircraft_is_ah64 = true;
+    input.input_valid = true;
+    input.assist_enabled = true;
+
+    damper.update(input);
+
+    input.physical_rudder = -1.0;
+    input.heading = -0.1;
+    const auto output = damper.update(input);
+
+    expect_true(output.reason == "turn command", "full pedal enters turn command");
+    expect_near(output.final_rudder, -1.0, 0.001, "full pedal turn is not yaw-rate limited");
 }
 
 }  // namespace
@@ -443,6 +466,7 @@ int main() {
     test_heading_hold_damps_heading_rate();
     test_heading_hold_recaptures_heading_after_turn_command();
     test_heading_hold_uses_release_brake_after_turn_command();
+    test_heading_hold_allows_full_pedal_turn_output();
 
     if (failures != 0) {
         std::cerr << failures << " test failure(s)\n";

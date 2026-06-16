@@ -138,6 +138,7 @@ YawDamperOutput YawDamper::update(const YawDamperInput& input) {
     double integral_assist = 0.0;
     double yaw_rate_command = 0.0;
     double heading_error = 0.0;
+    bool direct_turn_output = false;
     std::string reason = "assist";
     if (!allowed) {
         if (!input.telemetry_fresh) reason = "stale telemetry";
@@ -179,6 +180,8 @@ YawDamperOutput YawDamper::update(const YawDamperInput& input) {
                 config_.pedal_command_sign * config_.turn_rate_max * command_axis,
                 -config_.turn_rate_max,
                 config_.turn_rate_max);
+            target_assist = clamp_unit(config_.pedal_command_sign * physical);
+            direct_turn_output = true;
             if (input.heading_valid) {
                 heading_ref_ = input.heading;
                 has_heading_ref_ = true;
@@ -197,7 +200,7 @@ YawDamperOutput YawDamper::update(const YawDamperInput& input) {
                 integrated_yaw_rate_ = 0.0;
                 release_brake_timer_ = config_.release_brake_time;
             }
-            heading_error = wrap_pi(heading_ref_ - input.heading);
+            heading_error = with_deadband(wrap_pi(heading_ref_ - input.heading), config_.heading_error_deadband);
             yaw_rate_command = clamp(
                 config_.heading_kp * heading_error,
                 -config_.heading_rate_limit,
@@ -212,7 +215,9 @@ YawDamperOutput YawDamper::update(const YawDamperInput& input) {
         pedal_command_active_ = turn_command;
 
         const double rate_error = yaw_rate_command - rate;
-        if (!turn_command && config_.ki > 0.0 && config_.integral_limit > 0.0) {
+        if (direct_turn_output) {
+            integrated_yaw_rate_ = 0.0;
+        } else if (!turn_command && config_.ki > 0.0 && config_.integral_limit > 0.0) {
             integrated_yaw_rate_ += rate_error * dt;
             const double state_limit = config_.integral_limit / config_.ki;
             integrated_yaw_rate_ = clamp(integrated_yaw_rate_, -state_limit, state_limit);
@@ -221,23 +226,25 @@ YawDamperOutput YawDamper::update(const YawDamperInput& input) {
             integrated_yaw_rate_ = 0.0;
         }
 
-        const bool release_brake = !turn_command && release_brake_timer_ > 0.0;
-        const double feedback_kp = release_brake ? config_.release_brake_kp : config_.kp;
-        double feedback_assist = config_.yaw_response_sign * (feedback_kp * rate_error + integral_assist);
-        if (!turn_command) {
-            const double assist_limit = release_brake ? config_.release_brake_max_assist : config_.heading_hold_max_assist;
-            feedback_assist = clamp(
-                feedback_assist,
-                -assist_limit,
-                assist_limit);
+        if (!direct_turn_output) {
+            const bool release_brake = !turn_command && release_brake_timer_ > 0.0;
+            const double feedback_kp = release_brake ? config_.release_brake_kp : config_.kp;
+            double feedback_assist = config_.yaw_response_sign * (feedback_kp * rate_error + integral_assist);
+            if (!turn_command) {
+                const double assist_limit = release_brake ? config_.release_brake_max_assist : config_.heading_hold_max_assist;
+                feedback_assist = clamp(
+                    feedback_assist,
+                    -assist_limit,
+                    assist_limit);
+            }
+            if (release_brake_timer_ > 0.0) {
+                release_brake_timer_ = std::max(0.0, release_brake_timer_ - dt);
+            }
+            target_assist = clamp(
+                collective_feedforward + feedback_assist,
+                -config_.max_assist,
+                config_.max_assist);
         }
-        if (release_brake_timer_ > 0.0) {
-            release_brake_timer_ = std::max(0.0, release_brake_timer_ - dt);
-        }
-        target_assist = clamp(
-            collective_feedforward + feedback_assist,
-            -config_.max_assist,
-            config_.max_assist);
     } else {
         if (last_user_override_ && has_trim_candidate_) {
             trim_bias_ = trim_candidate_;
@@ -260,10 +267,14 @@ YawDamperOutput YawDamper::update(const YawDamperInput& input) {
     }
     last_user_override_ = user_override;
 
-    const bool reducing_magnitude = std::abs(target_assist) < std::abs(assist_offset_);
-    const double fade_time = reducing_magnitude ? config_.fade_out_time : config_.fade_in_time;
-    const double max_delta = fade_time <= 0.0 ? config_.max_assist : (config_.max_assist * dt / fade_time);
-    assist_offset_ = move_towards(assist_offset_, target_assist, max_delta);
+    if (direct_turn_output) {
+        assist_offset_ = target_assist;
+    } else {
+        const bool reducing_magnitude = std::abs(target_assist) < std::abs(assist_offset_);
+        const double fade_time = reducing_magnitude ? config_.fade_out_time : config_.fade_in_time;
+        const double max_delta = fade_time <= 0.0 ? config_.max_assist : (config_.max_assist * dt / fade_time);
+        assist_offset_ = move_towards(assist_offset_, target_assist, max_delta);
+    }
 
     YawDamperOutput output;
     output.final_rudder = heading_mode && allowed ? clamp_unit(assist_offset_) : clamp_unit(physical + assist_offset_);

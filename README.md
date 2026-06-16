@@ -158,8 +158,9 @@ That mode uses `final = physical_pedal + assist_offset` and fades assist out dur
 - `heading_kp`: how strongly heading error commands yaw rate in `heading_hold`.
 - `heading_rate_limit`: maximum automatic yaw-rate command while holding heading.
 - `heading_hold_max_assist`: maximum feedback authority while pedals are centered. This keeps heading hold from slamming to full pedal and oscillating.
+- `heading_error_deadband`: heading error ignored near zero to avoid small hold-mode hunting.
 - `release_brake_*`: short high-authority damping after you release a turn command. This stops residual yaw rate before returning to normal heading-hold authority.
-- `turn_rate_max`: maximum yaw-rate command from pedal intent.
+- `turn_rate_max`: logged yaw-rate intent scale. Active pedal turn output is direct, so the final vJoy axis is not limited by this value.
 - `pedal_command_*`: deadzone, hysteresis, and sign for treating pedals as turn commands.
 - `ki`: optional centered heading-hold integrator. Defaults to `0`; do not enable it until the proportional heading hold is stable.
 - `integral_limit`: maximum steady hold contribution from `ki`.
