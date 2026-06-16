@@ -163,6 +163,22 @@ void print_device_lists() {
                   << " / " << device.instance_name
                   << " instance=" << device.instance_guid
                   << " product=" << device.product_guid << '\n';
+        std::cout << "      axes:";
+        for (const char* axis : {"X", "Y", "Z", "RX", "RY", "RZ", "SLIDER0", "SLIDER1"}) {
+            try {
+                windows::DirectInputAxisInput input(device.index, "", axis);
+                const auto value = input.read();
+                std::cout << ' ' << axis << '=';
+                if (value) {
+                    std::cout << fixed3(*value);
+                } else {
+                    std::cout << "NA";
+                }
+            } catch (const std::exception&) {
+                std::cout << ' ' << axis << "=NA";
+            }
+        }
+        std::cout << '\n';
     }
 
     std::cout << "\nvJoy status:\n";
@@ -184,6 +200,7 @@ struct Runtime {
     std::optional<windows::FastExportUdpClient> fast_export;
     windows::DirectInputAxisInput pedals;
     std::optional<windows::DirectInputAxisInput> collective_input;
+    std::string collective_input_error;
 
     Runtime(AppConfig config)
         : cfg(std::move(config)),
@@ -197,6 +214,17 @@ struct Runtime {
         }
         if (cfg.collective_source == "directinput") {
             collective_input.emplace(cfg.collective_input_id, cfg.collective_device_name_contains, cfg.collective_axis_name);
+        } else if (cfg.collective_source == "auto") {
+            try {
+                if (cfg.collective_device_name_contains.empty()) {
+                    collective_input_error =
+                        "collective_device_name_contains is empty; set it to your collective device name or use collective_source=directinput";
+                } else {
+                    collective_input.emplace(cfg.collective_input_id, cfg.collective_device_name_contains, cfg.collective_axis_name);
+                }
+            } catch (const std::exception& ex) {
+                collective_input_error = ex.what();
+            }
         }
     }
 };
@@ -284,6 +312,17 @@ void log_tune_report(Logger& logger, const std::string& label, const TuneReport&
 }
 
 std::optional<double> read_collective(Runtime& runtime, const Telemetry& telemetry) {
+    if (runtime.cfg.collective_source == "auto") {
+        if (telemetry.collective) {
+            return telemetry.collective;
+        }
+        if (runtime.collective_input) {
+            if (const auto raw = runtime.collective_input->read()) {
+                return directinput_axis_to_collective(*raw, runtime.cfg);
+            }
+        }
+        return std::nullopt;
+    }
     if (runtime.cfg.collective_source == "directinput") {
         if (!runtime.collective_input) {
             return std::nullopt;
@@ -333,6 +372,8 @@ int run_normal(CliOptions options, AppConfig cfg) {
     runtime.logger.info("Selected pedal input: " + runtime.pedals.selected_name());
     if (runtime.collective_input) {
         runtime.logger.info("Selected collective input: " + runtime.collective_input->selected_name());
+    } else if (!runtime.collective_input_error.empty()) {
+        runtime.logger.warn("Collective DirectInput fallback unavailable: " + runtime.collective_input_error);
     } else {
         runtime.logger.info("Collective source: " + runtime.cfg.collective_source);
     }
@@ -432,6 +473,11 @@ int run_tune_session(AppConfig cfg, bool auto_apply) {
         runtime.logger.info("Auto tune does not edit config.ini; Ctrl+C prints the final active values.");
     }
     runtime.logger.info("Active tune config: " + tune_config_summary(active_cfg));
+    if (runtime.collective_input) {
+        runtime.logger.info("Selected collective input: " + runtime.collective_input->selected_name());
+    } else if (!runtime.collective_input_error.empty()) {
+        runtime.logger.warn("Collective DirectInput fallback unavailable: " + runtime.collective_input_error);
+    }
     runtime.logger.info("Press " + hotkey.name() + " to toggle assist; Ctrl+C to finish.");
 
     YawDamper damper(active_cfg);
@@ -495,6 +541,14 @@ int run_tune_session(AppConfig cfg, bool auto_apply) {
         if (now >= next_tune_report) {
             const TuneReport report = window_analyzer.report();
             log_tune_report(runtime.logger, auto_apply ? "Auto tune window" : "Tune window", report);
+            if (auto_apply &&
+                report.usable_seconds >= 5.0 &&
+                report.static_collective_seconds <= 0.0 &&
+                report.collective_transient_seconds <= 0.0) {
+                runtime.logger.warn(
+                    "Auto tune has no collective input; collective feedforward cannot tune. "
+                    "Run --list-devices while moving the collective, then set collective_device_name_contains and collective_axis_name.");
+            }
             if (auto_apply) {
                 const TuneUpdate update = choose_tune_update(make_tune_config(active_cfg), report);
                 if (update.changed) {
