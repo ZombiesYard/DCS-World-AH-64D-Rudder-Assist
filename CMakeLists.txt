@@ -12,6 +12,7 @@ add_library(autorudder_core
     src/dcs_bios_refs.cpp
     src/dcs_bios_state.cpp
     src/logger.cpp
+    src/tune_session.cpp
     src/yaw_damper.cpp
 )
 

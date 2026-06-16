@@ -125,6 +125,27 @@ The default direction may need flipping. Use low-authority sign calibration only
 
 Keep pedals centered. The app tests `assist_sign=+1` and `assist_sign=-1`, then logs the lower mean absolute yaw-rate recommendation. Put that value into `config.ini`.
 
+## Tune Session
+
+After the sign is correct and the helicopter is controllable, run a tune session:
+
+```powershell
+.\build\Release\ah64d_auto_rudder.exe --tune-session
+```
+
+This mode still writes the final rudder to vJoy #2, but it also prints a tuning summary every 10 seconds and once again when you exit with Ctrl+C. Use it in this order:
+
+```text
+1. Center pedals in hover or low-speed flight.
+2. Move collective up/down several times, then hold it steady.
+3. Let the aircraft settle in centered-pedal heading hold.
+4. Ignore pedal turn-command segments; the analyzer ignores them too.
+```
+
+The analyzer first looks for steady collective feedforward error and recommends `collective_gain` changes when centered-pedal feedback is doing constant work. Then it looks at collective transients and may recommend `collective_rate_gain`. Finally it scores quiet centered-pedal heading hold and may recommend `kp` or, only for non-VRS normal segments, `heading_hold_max_assist`.
+
+It deliberately excludes stale telemetry, non-AH-64D data, active pedal turns, and unstable/VRS-like segments. The recommendations are logged only; it does not edit `config.ini` automatically.
+
 ## Control Modes
 
 The default mode is:

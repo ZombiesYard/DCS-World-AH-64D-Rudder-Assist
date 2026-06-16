@@ -2,6 +2,7 @@
 #include "dcs_bios_protocol.h"
 #include "dcs_bios_refs.h"
 #include "dcs_bios_state.h"
+#include "tune_session.h"
 #include "yaw_damper.h"
 
 #include <cmath>
@@ -449,6 +450,97 @@ void test_heading_hold_allows_full_pedal_turn_output() {
     expect_near(output.final_rudder, -1.0, 0.001, "full pedal turn is not yaw-rate limited");
 }
 
+autorudder::TuneConfig tune_config() {
+    autorudder::TuneConfig cfg;
+    cfg.kp = 1.45;
+    cfg.heading_hold_max_assist = 0.35;
+    cfg.collective_gain = 0.70;
+    cfg.collective_rate_gain = 0.20;
+    cfg.collective_sign = -1.0;
+    return cfg;
+}
+
+void test_tune_session_recommends_collective_gain_increase() {
+    const auto cfg = tune_config();
+    autorudder::TuneSessionAnalyzer analyzer(cfg);
+
+    autorudder::TuneSample sample;
+    sample.dt = 0.1;
+    sample.pedal = 0.0;
+    sample.heading_rate = 0.01;
+    sample.heading_error = 0.01;
+    sample.collective = 0.5;
+    sample.collective_rate = 0.0;
+    sample.collective_feedforward = -0.35;
+    sample.final_rudder = -0.45;
+    sample.fresh = true;
+    sample.aircraft_is_ah64 = true;
+    sample.input_valid = true;
+    sample.heading_valid = true;
+    sample.collective_valid = true;
+    sample.heading_hold_mode = true;
+
+    for (int i = 0; i < 60; ++i) {
+        analyzer.add(sample);
+    }
+
+    const auto report = analyzer.report();
+    expect_true(report.recommended_collective_gain.has_value(), "steady feedback recommends collective gain");
+    expect_true(*report.recommended_collective_gain > cfg.collective_gain, "collective gain increases when feedback adds same-direction rudder");
+}
+
+void test_tune_session_recommends_kp_increase_for_slow_damping() {
+    const auto cfg = tune_config();
+    autorudder::TuneSessionAnalyzer analyzer(cfg);
+
+    autorudder::TuneSample sample;
+    sample.dt = 0.1;
+    sample.pedal = 0.0;
+    sample.heading_rate = 0.10;
+    sample.heading_error = 0.02;
+    sample.final_rudder = -0.10;
+    sample.fresh = true;
+    sample.aircraft_is_ah64 = true;
+    sample.input_valid = true;
+    sample.heading_valid = true;
+    sample.collective_valid = false;
+    sample.heading_hold_mode = true;
+
+    for (int i = 0; i < 60; ++i) {
+        analyzer.add(sample);
+    }
+
+    const auto report = analyzer.report();
+    expect_true(report.recommended_kp.has_value(), "slow centered yaw damping recommends kp");
+    expect_true(*report.recommended_kp > cfg.kp, "kp increases when hRate remains high without saturation");
+}
+
+void test_tune_session_excludes_unstable_segments() {
+    autorudder::TuneSessionAnalyzer analyzer(tune_config());
+
+    autorudder::TuneSample sample;
+    sample.dt = 0.1;
+    sample.pedal = 0.0;
+    sample.heading_rate = 2.0;
+    sample.heading_error = 1.2;
+    sample.final_rudder = -0.35;
+    sample.fresh = true;
+    sample.aircraft_is_ah64 = true;
+    sample.input_valid = true;
+    sample.heading_valid = true;
+    sample.collective_valid = true;
+    sample.heading_hold_mode = true;
+
+    for (int i = 0; i < 60; ++i) {
+        analyzer.add(sample);
+    }
+
+    const auto report = analyzer.report();
+    expect_true(report.usable_seconds < 0.001, "unstable segments are not usable tune data");
+    expect_true(report.excluded_unstable_seconds > 5.0, "unstable segment time is reported");
+    expect_true(!report.recommended_heading_hold_max_assist.has_value(), "unstable saturation does not recommend more authority");
+}
+
 }  // namespace
 
 int main() {
@@ -467,6 +559,9 @@ int main() {
     test_heading_hold_recaptures_heading_after_turn_command();
     test_heading_hold_uses_release_brake_after_turn_command();
     test_heading_hold_allows_full_pedal_turn_output();
+    test_tune_session_recommends_collective_gain_increase();
+    test_tune_session_recommends_kp_increase_for_slow_damping();
+    test_tune_session_excludes_unstable_segments();
 
     if (failures != 0) {
         std::cerr << failures << " test failure(s)\n";

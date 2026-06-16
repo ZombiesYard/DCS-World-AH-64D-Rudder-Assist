@@ -4,6 +4,7 @@
 #include "dcs_bios_refs.h"
 #include "dcs_bios_state.h"
 #include "logger.h"
+#include "tune_session.h"
 #include "windows/dcs_bios_udp_client.h"
 #include "windows/directinput_axis.h"
 #include "windows/fast_export_udp_client.h"
@@ -48,16 +49,18 @@ struct CliOptions {
     bool list_devices = false;
     bool calibrate_sign = false;
     bool test_output = false;
+    bool tune_session = false;
     bool help = false;
 };
 
 void print_help() {
     std::cout
         << "AH-64D external yaw FBW / auto rudder\n"
-        << "Usage: ah64d_auto_rudder [--config PATH] [--dry-run] [--list-devices] [--calibrate-sign]\n\n"
+        << "Usage: ah64d_auto_rudder [--config PATH] [--dry-run] [--list-devices] [--calibrate-sign] [--tune-session]\n\n"
         << "  --list-devices    Print DirectInput and vJoy devices, then exit.\n"
         << "  --dry-run         Decode DCS-BIOS and pedals without writing vJoy.\n"
         << "  --calibrate-sign  Run a low-authority sign comparison on vJoy output.\n"
+        << "  --tune-session    Fly normally while logging feedforward and yaw-damping tuning advice.\n"
         << "  --test-output     Sweep the configured output vJoy axis for binding diagnostics.\n"
         << "  --config PATH     Use another config.ini path.\n"
         << "  --help            Print this help.\n";
@@ -77,6 +80,8 @@ CliOptions parse_args(const std::vector<std::string>& args) {
             options.calibrate_sign = true;
         } else if (arg == "--test-output") {
             options.test_output = true;
+        } else if (arg == "--tune-session") {
+            options.tune_session = true;
         } else if (arg == "--config") {
             if (i + 1 >= args.size()) {
                 throw std::runtime_error("--config requires a path");
@@ -202,6 +207,59 @@ double directinput_axis_to_collective(double raw_axis, const AppConfig& cfg) {
         value = 1.0 - value;
     }
     return clamp01(value);
+}
+
+TuneConfig make_tune_config(const AppConfig& cfg) {
+    TuneConfig tune;
+    tune.kp = cfg.kp;
+    tune.heading_hold_max_assist = cfg.heading_hold_max_assist;
+    tune.collective_gain = cfg.collective_gain;
+    tune.collective_rate_gain = cfg.collective_rate_gain;
+    tune.collective_sign = cfg.collective_sign;
+    return tune;
+}
+
+void add_tune_sample(
+    TuneSessionAnalyzer& analyzer,
+    double dt,
+    const std::optional<double>& pedal,
+    const TelemetrySample& sample,
+    const std::optional<double>& collective,
+    const YawDamperOutput& result) {
+    TuneSample tune_sample;
+    tune_sample.dt = dt;
+    tune_sample.pedal = pedal.value_or(0.0);
+    tune_sample.heading_rate = result.heading_rate;
+    tune_sample.heading_error = result.heading_error;
+    tune_sample.collective = collective.value_or(0.0);
+    tune_sample.collective_rate = result.collective_rate;
+    tune_sample.collective_feedforward = result.collective_feedforward;
+    tune_sample.final_rudder = result.final_rudder;
+    tune_sample.fresh = sample.fresh;
+    tune_sample.aircraft_is_ah64 = sample.telemetry.aircraft_is_ah64;
+    tune_sample.input_valid = pedal.has_value();
+    tune_sample.heading_valid = sample.telemetry.heading.has_value();
+    tune_sample.collective_valid = collective.has_value();
+    tune_sample.heading_hold_mode = result.reason == "heading hold";
+    analyzer.add(tune_sample);
+}
+
+void log_tune_report(Logger& logger, const std::string& label, const TuneReport& report) {
+    std::ostringstream line;
+    line << label
+         << " usable=" << fixed3(report.usable_seconds) << "s"
+         << " normal=" << fixed3(report.normal_seconds) << "s"
+         << " hRateRms=" << fixed3(report.heading_rate_rms)
+         << " hRatePeak=" << fixed3(report.heading_rate_peak)
+         << " finalMean=" << fixed3(report.final_abs_mean)
+         << " sat=" << fixed3(report.saturation_ratio * 100.0) << "%"
+         << " osc/s=" << fixed3(report.oscillation_rate)
+         << " staticColl=" << fixed3(report.static_collective_seconds) << "s"
+         << " transColl=" << fixed3(report.collective_transient_seconds) << "s";
+    logger.info(line.str());
+    for (const auto& recommendation : report.recommendations) {
+        logger.info(label + " recommend: " + recommendation);
+    }
 }
 
 std::optional<double> read_collective(Runtime& runtime, const Telemetry& telemetry) {
@@ -334,6 +392,90 @@ int run_normal(CliOptions options, AppConfig cfg) {
         output->set_axis(0.0);
     }
     runtime.logger.info("Stopped");
+    return 0;
+}
+
+int run_tune_session(AppConfig cfg) {
+    Runtime runtime(std::move(cfg));
+    windows::Hotkey hotkey(runtime.cfg.hotkey);
+    windows::VJoyDevice output(runtime.cfg.output_vjoy_id, runtime.cfg.axis_name);
+
+    runtime.logger.info("Tune session writes final rudder to vJoy #" + std::to_string(runtime.cfg.output_vjoy_id));
+    runtime.logger.info("Goal order: tune collective feedforward first, then yaw-rate P damping.");
+    runtime.logger.info("Fly centered-pedal hover/low-speed segments. Move collective up/down several times, then hold steady.");
+    runtime.logger.info("Pedal turn commands, stale telemetry, non-AH-64D data, and unstable/VRS-like segments are ignored.");
+    runtime.logger.info("Press " + hotkey.name() + " to toggle assist; Ctrl+C to finish and print final recommendations.");
+
+    YawDamper damper(runtime.cfg);
+    TuneSessionAnalyzer total_analyzer(make_tune_config(runtime.cfg));
+    TuneSessionAnalyzer window_analyzer(make_tune_config(runtime.cfg));
+    bool assist_enabled = true;
+    auto last = std::chrono::steady_clock::now();
+    auto next_log = last;
+    auto next_tune_report = last + std::chrono::seconds(10);
+    const auto loop_period = std::chrono::duration<double>(1.0 / static_cast<double>(runtime.cfg.loop_hz));
+
+    while (g_running) {
+        const auto now = std::chrono::steady_clock::now();
+        const double dt = std::chrono::duration<double>(now - last).count();
+        last = now;
+
+        if (hotkey.pressed_edge()) {
+            assist_enabled = !assist_enabled;
+            runtime.logger.info(std::string("Assist ") + (assist_enabled ? "enabled" : "disabled"));
+        }
+
+        const auto pedal = runtime.pedals.read();
+        const TelemetrySample sample = sample_telemetry(runtime);
+        const Telemetry& telemetry = sample.telemetry;
+        const auto collective = read_collective(runtime, telemetry);
+
+        YawDamperInput damper_input;
+        damper_input.dt = dt;
+        damper_input.physical_rudder = pedal.value_or(0.0);
+        damper_input.yaw_rate_z = telemetry.yaw_rate_z;
+        damper_input.heading = telemetry.heading.value_or(0.0);
+        damper_input.collective = collective.value_or(0.0);
+        damper_input.heading_valid = telemetry.heading.has_value();
+        damper_input.collective_valid = collective.has_value();
+        damper_input.telemetry_fresh = sample.fresh;
+        damper_input.aircraft_is_ah64 = telemetry.aircraft_is_ah64;
+        damper_input.input_valid = pedal.has_value();
+        damper_input.assist_enabled = assist_enabled;
+        const auto result = damper.update(damper_input);
+        output.set_axis(result.final_rudder);
+
+        add_tune_sample(window_analyzer, dt, pedal, sample, collective, result);
+        add_tune_sample(total_analyzer, dt, pedal, sample, collective, result);
+
+        if (now >= next_log) {
+            std::ostringstream line;
+            line << "tune acft=" << (telemetry.aircraft_name.empty() ? "NONE" : telemetry.aircraft_name)
+                 << " fresh=" << (sample.fresh ? "yes" : "no")
+                 << " pedal=" << fixed3(pedal.value_or(0.0))
+                 << " hRate=" << fixed3(result.heading_rate)
+                 << " hErr=" << fixed3(result.heading_error)
+                 << " coll=" << (collective ? fixed3(*collective) : "NA")
+                 << " cdot=" << fixed3(result.collective_rate)
+                 << " cff=" << fixed3(result.collective_feedforward)
+                 << " final=" << fixed3(result.final_rudder)
+                 << " mode=" << result.reason;
+            runtime.logger.info(line.str());
+            next_log = now + std::chrono::milliseconds(250);
+        }
+
+        if (now >= next_tune_report) {
+            log_tune_report(runtime.logger, "Tune window", window_analyzer.report());
+            window_analyzer.reset();
+            next_tune_report = now + std::chrono::seconds(10);
+        }
+
+        std::this_thread::sleep_until(now + loop_period);
+    }
+
+    output.set_axis(0.0);
+    log_tune_report(runtime.logger, "Tune final", total_analyzer.report());
+    runtime.logger.info("Stopped tune session");
     return 0;
 }
 
@@ -471,6 +613,9 @@ int run_app(const std::vector<std::string>& args) {
         }
         if (options.calibrate_sign) {
             return run_calibration(std::move(cfg));
+        }
+        if (options.tune_session) {
+            return run_tune_session(std::move(cfg));
         }
         return run_normal(options, std::move(cfg));
     } catch (const std::exception& ex) {
