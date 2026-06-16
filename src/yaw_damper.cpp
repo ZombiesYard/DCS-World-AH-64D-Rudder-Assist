@@ -62,6 +62,9 @@ void YawDamper::reset() {
     has_heading_ref_ = false;
     heading_ref_ = 0.0;
     pedal_command_active_ = false;
+    has_last_heading_ = false;
+    last_heading_ = 0.0;
+    filtered_heading_rate_ = 0.0;
 }
 
 YawDamperOutput YawDamper::update(const YawDamperInput& input) {
@@ -91,6 +94,26 @@ YawDamperOutput YawDamper::update(const YawDamperInput& input) {
         input.assist_enabled;
     const bool heading_mode =
         config_.control_mode == "heading_hold" || config_.control_mode == "heading_command";
+    double measured_heading_rate = config_.yaw_rate_sign * filtered_yaw_rate_;
+    if (input.heading_valid) {
+        if (has_last_heading_) {
+            const double raw_heading_rate = wrap_pi(input.heading - last_heading_) / dt;
+            if (config_.filter_time <= 0.0) {
+                filtered_heading_rate_ = raw_heading_rate;
+            } else {
+                const double alpha = dt / (config_.filter_time + dt);
+                filtered_heading_rate_ += alpha * (raw_heading_rate - filtered_heading_rate_);
+            }
+        } else {
+            filtered_heading_rate_ = measured_heading_rate;
+            has_last_heading_ = true;
+        }
+        last_heading_ = input.heading;
+        measured_heading_rate = filtered_heading_rate_;
+    } else {
+        has_last_heading_ = false;
+        filtered_heading_rate_ = measured_heading_rate;
+    }
 
     double collective_rate = 0.0;
     double collective_feedforward = 0.0;
@@ -123,6 +146,7 @@ YawDamperOutput YawDamper::update(const YawDamperInput& input) {
         integrated_yaw_rate_ = 0.0;
         has_heading_ref_ = false;
         pedal_command_active_ = false;
+        has_last_heading_ = false;
     } else if (!heading_mode && user_override) {
         reason = "pedal override";
         integrated_yaw_rate_ = 0.0;
@@ -138,7 +162,7 @@ YawDamperOutput YawDamper::update(const YawDamperInput& input) {
             }
         }
     } else if (heading_mode) {
-        const double rate = with_deadband(filtered_yaw_rate_, config_.yaw_rate_deadband);
+        const double rate = with_deadband(measured_heading_rate, config_.yaw_rate_deadband);
         bool turn_command = false;
         if (pedal_command_active_) {
             turn_command = std::abs(physical) >= config_.pedal_command_exit_deadzone;
@@ -191,8 +215,15 @@ YawDamperOutput YawDamper::update(const YawDamperInput& input) {
             integrated_yaw_rate_ = 0.0;
         }
 
+        double feedback_assist = config_.yaw_response_sign * (config_.kp * rate_error + integral_assist);
+        if (!turn_command) {
+            feedback_assist = clamp(
+                feedback_assist,
+                -config_.heading_hold_max_assist,
+                config_.heading_hold_max_assist);
+        }
         target_assist = clamp(
-            collective_feedforward + config_.yaw_response_sign * (config_.kp * rate_error + integral_assist),
+            collective_feedforward + feedback_assist,
             -config_.max_assist,
             config_.max_assist);
     } else {
@@ -231,6 +262,7 @@ YawDamperOutput YawDamper::update(const YawDamperInput& input) {
     output.collective = collective;
     output.collective_rate = collective_rate;
     output.filtered_yaw_rate = filtered_yaw_rate_;
+    output.heading_rate = measured_heading_rate;
     output.yaw_rate_command = yaw_rate_command;
     output.heading = input.heading;
     output.heading_ref = heading_ref_;

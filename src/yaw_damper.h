@@ -29,6 +29,7 @@ struct YawDamperOutput {
     double collective = 0.0;
     double collective_rate = 0.0;
     double filtered_yaw_rate = 0.0;
+    double heading_rate = 0.0;
     double yaw_rate_command = 0.0;
     double heading = 0.0;
     double heading_ref = 0.0;
@@ -62,6 +63,9 @@ private:
     bool has_heading_ref_ = false;
     double heading_ref_ = 0.0;
     bool pedal_command_active_ = false;
+    bool has_last_heading_ = false;
+    double last_heading_ = 0.0;
+    double filtered_heading_rate_ = 0.0;
 };
 
 double clamp_unit(double value);

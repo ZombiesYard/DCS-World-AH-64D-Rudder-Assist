@@ -307,6 +307,7 @@ int run_normal(CliOptions options, AppConfig cfg) {
                  << " pedal=" << fixed3(pedal.value_or(0.0))
                  << " yawZ=" << fixed3(telemetry.yaw_rate_z)
                  << " rCmd=" << fixed3(result.yaw_rate_command)
+                 << " hRate=" << fixed3(result.heading_rate)
                  << " hdg=" << (telemetry.heading ? fixed3(*telemetry.heading) : "NA")
                  << " href=" << fixed3(result.heading_ref)
                  << " hErr=" << fixed3(result.heading_error)

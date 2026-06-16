@@ -152,10 +152,12 @@ That mode uses `final = physical_pedal + assist_offset` and fades assist out dur
 ## Main Tuning Fields
 
 - `yaw_response_sign`: flip between `1` and `-1` if heading-hold correction makes yaw worse. If the log shows `yawZ` and `final` keep the same sign while yaw grows, flip this first.
+- `yaw_rate_sign`: sign used when heading rate must fall back to `yawZ`; in the observed AH-64D export, positive rudder increased heading while `yawZ` often went negative, so the default is `-1`.
 - `assist_sign`: old `yaw_damper` mode correction sign.
 - `kp`: yaw-rate inner-loop correction strength.
 - `heading_kp`: how strongly heading error commands yaw rate in `heading_hold`.
 - `heading_rate_limit`: maximum automatic yaw-rate command while holding heading.
+- `heading_hold_max_assist`: maximum feedback authority while pedals are centered. This keeps heading hold from slamming to full pedal and oscillating.
 - `turn_rate_max`: maximum yaw-rate command from pedal intent.
 - `pedal_command_*`: deadzone, hysteresis, and sign for treating pedals as turn commands.
 - `ki`: optional centered heading-hold integrator. Defaults to `0`; do not enable it until the proportional heading hold is stable.

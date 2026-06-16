@@ -52,10 +52,12 @@ void apply_key(AppConfig& cfg, const std::string& key, const std::string& value)
     else if (key == "control_mode") cfg.control_mode = value;
     else if (key == "assist_sign") cfg.assist_sign = parse_double(value, key);
     else if (key == "yaw_response_sign") cfg.yaw_response_sign = parse_double(value, key);
+    else if (key == "yaw_rate_sign") cfg.yaw_rate_sign = parse_double(value, key);
     else if (key == "kp") cfg.kp = parse_double(value, key);
     else if (key == "ki") cfg.ki = parse_double(value, key);
     else if (key == "integral_limit") cfg.integral_limit = parse_double(value, key);
     else if (key == "max_assist") cfg.max_assist = parse_double(value, key);
+    else if (key == "heading_hold_max_assist") cfg.heading_hold_max_assist = parse_double(value, key);
     else if (key == "yaw_rate_deadband") cfg.yaw_rate_deadband = parse_double(value, key);
     else if (key == "heading_kp") cfg.heading_kp = parse_double(value, key);
     else if (key == "heading_rate_limit") cfg.heading_rate_limit = parse_double(value, key);
@@ -108,6 +110,9 @@ void validate(const AppConfig& cfg) {
         throw std::runtime_error("integral_limit must be in [0, 1]");
     }
     if (cfg.max_assist < 0.0 || cfg.max_assist > 1.0) throw std::runtime_error("max_assist must be in [0, 1]");
+    if (cfg.heading_hold_max_assist < 0.0 || cfg.heading_hold_max_assist > cfg.max_assist) {
+        throw std::runtime_error("heading_hold_max_assist must be in [0, max_assist]");
+    }
     if (cfg.heading_kp < 0.0) throw std::runtime_error("heading_kp must be non-negative");
     if (cfg.heading_rate_limit < 0.0) throw std::runtime_error("heading_rate_limit must be non-negative");
     if (cfg.turn_rate_max < 0.0) throw std::runtime_error("turn_rate_max must be non-negative");
@@ -197,10 +202,12 @@ void write_default_config(const std::filesystem::path& path) {
         << "control_mode=" << cfg.control_mode << "\n"
         << "assist_sign=" << cfg.assist_sign << "\n"
         << "yaw_response_sign=" << cfg.yaw_response_sign << "\n"
+        << "yaw_rate_sign=" << cfg.yaw_rate_sign << "\n"
         << "kp=" << cfg.kp << "\n"
         << "ki=" << cfg.ki << "\n"
         << "integral_limit=" << cfg.integral_limit << "\n"
         << "max_assist=" << cfg.max_assist << "\n"
+        << "heading_hold_max_assist=" << cfg.heading_hold_max_assist << "\n"
         << "yaw_rate_deadband=" << cfg.yaw_rate_deadband << "\n"
         << "heading_kp=" << cfg.heading_kp << "\n"
         << "heading_rate_limit=" << cfg.heading_rate_limit << "\n"
