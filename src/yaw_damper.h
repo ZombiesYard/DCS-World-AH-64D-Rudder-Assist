@@ -78,6 +78,7 @@ private:
     double last_heading_ = 0.0;
     double filtered_heading_rate_ = 0.0;
     double release_brake_timer_ = 0.0;
+    double rate_rescue_blend_ = 0.0;
 };
 
 double clamp_unit(double value);

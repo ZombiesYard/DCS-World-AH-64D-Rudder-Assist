@@ -45,6 +45,10 @@ double signed_power_curve(double value, double exponent) {
     return std::copysign(std::pow(std::abs(value), exponent), value);
 }
 
+double lerp(double from, double to, double blend) {
+    return from + (to - from) * blend;
+}
+
 double collective_static_term(const AppConfig& config, double collective) {
     if (config.collective_feedforward_mode == "power") {
         return std::pow(std::abs(collective - config.collective_zero_thrust), config.collective_power_exponent);
@@ -89,6 +93,7 @@ void YawDamper::reset() {
     last_heading_ = 0.0;
     filtered_heading_rate_ = 0.0;
     release_brake_timer_ = 0.0;
+    rate_rescue_blend_ = 0.0;
 }
 
 YawDamperOutput YawDamper::update(const YawDamperInput& input) {
@@ -251,6 +256,7 @@ YawDamperOutput YawDamper::update(const YawDamperInput& input) {
         heading_ref_ = input.heading;
         pedal_command_active_ = false;
         release_brake_timer_ = 0.0;
+        rate_rescue_blend_ = 0.0;
 
         YawDamperOutput output;
         output.final_rudder = physical;
@@ -280,7 +286,6 @@ YawDamperOutput YawDamper::update(const YawDamperInput& input) {
     double yaw_rate_command = 0.0;
     double heading_error = 0.0;
     bool direct_turn_output = false;
-    bool high_authority_rate_hold = false;
     std::string reason = "assist";
     if (!allowed) {
         if (!input.telemetry_fresh) reason = "stale telemetry";
@@ -293,6 +298,7 @@ YawDamperOutput YawDamper::update(const YawDamperInput& input) {
         pedal_command_active_ = false;
         has_last_heading_ = false;
         release_brake_timer_ = 0.0;
+        rate_rescue_blend_ = 0.0;
     } else if (!heading_mode && user_override) {
         reason = "pedal override";
         integrated_yaw_rate_ = 0.0;
@@ -333,6 +339,7 @@ YawDamperOutput YawDamper::update(const YawDamperInput& input) {
             integrated_yaw_rate_ = 0.0;
             yaw_rate_error_integral_ = 0.0;
             release_brake_timer_ = 0.0;
+            rate_rescue_blend_ = 0.0;
             reason = "turn command";
         } else if (input.heading_valid) {
             if (!has_heading_ref_) {
@@ -345,6 +352,7 @@ YawDamperOutput YawDamper::update(const YawDamperInput& input) {
                 integrated_yaw_rate_ = 0.0;
                 yaw_rate_error_integral_ = 0.0;
                 release_brake_timer_ = config_.release_brake_time;
+                rate_rescue_blend_ = 0.0;
             }
             if (release_brake_timer_ > 0.0) {
                 heading_ref_ = input.heading;
@@ -358,6 +366,7 @@ YawDamperOutput YawDamper::update(const YawDamperInput& input) {
                 integrated_yaw_rate_ = 0.0;
                 yaw_rate_error_integral_ = 0.0;
                 release_brake_timer_ = 0.0;
+                rate_rescue_blend_ = 0.0;
                 relocked_heading = true;
             }
             if (!relocked_heading && config_.heading_hold_leak_time > 0.0) {
@@ -411,13 +420,21 @@ YawDamperOutput YawDamper::update(const YawDamperInput& input) {
 
         if (!direct_turn_output) {
             const double rescue_threshold = std::max(config_.heading_rate_limit, 0.12);
-            const bool rate_rescue = !turn_command && !release_brake && std::abs(rate_error) >= rescue_threshold;
-            const double feedback_kp =
-                release_brake || rate_rescue ? std::max(config_.release_brake_kp, config_.kp) : config_.kp;
+            double rate_rescue_target = 0.0;
+            if (!turn_command && !release_brake) {
+                const double rescue_width = std::max(0.5 * rescue_threshold, 0.06);
+                rate_rescue_target =
+                    clamp((std::abs(rate_error) - rescue_threshold) / rescue_width, 0.0, 1.0);
+            }
+            const double rescue_time = rate_rescue_target > rate_rescue_blend_ ? 0.12 : 0.28;
+            rate_rescue_blend_ =
+                move_towards(rate_rescue_blend_, rate_rescue_target, dt / rescue_time);
+            const bool rate_rescue = rate_rescue_blend_ > 0.001;
+            const double high_kp = std::max(config_.release_brake_kp, config_.kp);
+            const double feedback_kp = release_brake ? high_kp : lerp(config_.kp, high_kp, rate_rescue_blend_);
             if (rate_rescue && reason == "heading hold") {
                 reason = "rate rescue";
             }
-            high_authority_rate_hold = release_brake || rate_rescue;
             yaw_acceleration_assist = clamp(
                 -config_.yaw_response_sign * config_.yaw_accel_gain * measured_heading_acceleration,
                 -config_.yaw_accel_limit,
@@ -425,10 +442,12 @@ YawDamperOutput YawDamper::update(const YawDamperInput& input) {
             double feedback_assist = config_.yaw_response_sign * (feedback_kp * shaped_rate_error + integral_assist);
             feedback_assist += yaw_acceleration_assist;
             if (!turn_command) {
+                const double high_assist_limit =
+                    std::max(config_.release_brake_max_assist, config_.heading_hold_max_assist);
                 const double assist_limit =
-                    release_brake || rate_rescue
-                        ? std::max(config_.release_brake_max_assist, config_.heading_hold_max_assist)
-                        : config_.heading_hold_max_assist;
+                    release_brake
+                        ? high_assist_limit
+                        : lerp(config_.heading_hold_max_assist, high_assist_limit, rate_rescue_blend_);
                 feedback_assist = clamp(
                     feedback_assist,
                     -assist_limit,
@@ -438,7 +457,7 @@ YawDamperOutput YawDamper::update(const YawDamperInput& input) {
                 release_brake_timer_ = std::max(0.0, release_brake_timer_ - dt);
             }
             const double target_limit =
-                high_authority_rate_hold
+                release_brake
                     ? std::min(config_.max_assist, config_.release_brake_max_assist)
                     : config_.max_assist;
             target_assist = clamp(

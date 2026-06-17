@@ -934,6 +934,37 @@ void test_heading_hold_rate_rescue_overrides_feedforward_bias() {
     expect_true(output.reason == "rate rescue", "large self-yaw enters rescue mode");
 }
 
+void test_heading_hold_rate_rescue_blends_near_threshold() {
+    auto cfg = heading_config();
+    cfg.yaw_rate_source = "angular";
+    cfg.kp = 1.0;
+    cfg.release_brake_kp = 3.0;
+    cfg.heading_hold_max_assist = 0.20;
+    cfg.release_brake_max_assist = 0.80;
+    cfg.heading_rate_limit = 0.20;
+    cfg.collective_gain = 0.0;
+    cfg.fade_in_time = 0.0;
+    cfg.fade_out_time = 0.0;
+    autorudder::YawDamper damper(cfg);
+
+    autorudder::YawDamperInput input;
+    input.dt = 0.02;
+    input.physical_rudder = 0.0;
+    input.heading = 1.0;
+    input.heading_valid = true;
+    input.telemetry_fresh = true;
+    input.aircraft_is_ah64 = true;
+    input.input_valid = true;
+    input.assist_enabled = true;
+
+    damper.update(input);
+    input.yaw_rate_z = 0.205;
+    const auto output = damper.update(input);
+
+    expect_true(output.reason == "rate rescue", "near-threshold self-yaw reports rescue mode");
+    expect_true(output.final_rudder < 0.25, "near-threshold rescue blends in instead of jumping to high authority");
+}
+
 void test_heading_hold_uses_yaw_acceleration_lead() {
     auto cfg = heading_config();
     cfg.yaw_accel_gain = 0.20;
@@ -1634,6 +1665,7 @@ int main() {
     test_heading_hold_falls_back_when_angular_velocity_underreports();
     test_heading_hold_does_not_fallback_to_opposite_heading_derivative();
     test_heading_hold_rate_rescue_overrides_feedforward_bias();
+    test_heading_hold_rate_rescue_blends_near_threshold();
     test_heading_hold_uses_yaw_acceleration_lead();
     test_trim_guard_clears_automatic_rudder_before_trim();
     test_heading_hold_relocks_large_heading_error();
