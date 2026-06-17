@@ -1,0 +1,3 @@
+#include "resource.h"
+
+IDR_RETRO_MUSIC RCDATA "../../assets/retro/retro_music.wav"

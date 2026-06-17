@@ -80,7 +80,12 @@ BOOL CALLBACK select_callback(const DIDEVICEINSTANCEA* instance, VOID* user) {
     auto* ctx = static_cast<SelectContext*>(user);
     const std::string product = instance->tszProductName;
     const std::string instance_name = instance->tszInstanceName;
-    if (!contains_case_insensitive(product, ctx->filter) && !contains_case_insensitive(instance_name, ctx->filter)) {
+    const std::string instance_guid = guid_to_string(instance->guidInstance);
+    const std::string product_guid = guid_to_string(instance->guidProduct);
+    if (!contains_case_insensitive(product, ctx->filter) &&
+        !contains_case_insensitive(instance_name, ctx->filter) &&
+        !contains_case_insensitive(instance_guid, ctx->filter) &&
+        !contains_case_insensitive(product_guid, ctx->filter)) {
         return DIENUM_CONTINUE;
     }
 
@@ -90,7 +95,9 @@ BOOL CALLBACK select_callback(const DIDEVICEINSTANCEA* instance, VOID* user) {
     }
 
     if (SUCCEEDED(ctx->direct_input->CreateDevice(instance->guidInstance, &ctx->selected, nullptr))) {
-        ctx->selected_name = product.empty() ? instance_name : product;
+        const std::string display_name = product.empty() ? instance_name : product;
+        ctx->selected_name =
+            display_name + " instance=" + instance_guid + " product=" + product_guid;
         return DIENUM_STOP;
     }
     return DIENUM_CONTINUE;
@@ -221,6 +228,131 @@ DirectInputAxisInput::Axis DirectInputAxisInput::parse_axis(const std::string& a
 double DirectInputAxisInput::normalize_long(long value) {
     const double normalized = static_cast<double>(value) / 32767.0;
     return std::max(-1.0, std::min(1.0, normalized));
+}
+
+DirectInputButtonInput::DirectInputButtonInput(
+    int occurrence,
+    const std::string& name_filter,
+    int button_number)
+    : button_index_(button_number - 1) {
+    if (button_number < 1 || button_number > 128) {
+        throw std::runtime_error("button_number must be in [1, 128]");
+    }
+
+    check_hr(
+        DirectInput8Create(GetModuleHandle(nullptr), DIRECTINPUT_VERSION, IID_IDirectInput8A, reinterpret_cast<void**>(&direct_input_), nullptr),
+        "DirectInput8Create");
+
+    SelectContext ctx;
+    ctx.direct_input = direct_input_;
+    ctx.filter = name_filter;
+    ctx.target_occurrence = std::max(1, occurrence);
+    check_hr(
+        direct_input_->EnumDevices(DI8DEVCLASS_GAMECTRL, select_callback, &ctx, DIEDFL_ATTACHEDONLY),
+        "EnumDevices");
+
+    if (!ctx.selected) {
+        throw std::runtime_error("Could not find DirectInput device matching '" + name_filter + "' occurrence " + std::to_string(occurrence));
+    }
+
+    device_ = ctx.selected;
+    selected_name_ = ctx.selected_name;
+    check_hr(device_->SetDataFormat(&c_dfDIJoystick2), "SetDataFormat");
+
+    HWND hwnd = GetConsoleWindow();
+    if (!hwnd) {
+        hwnd = GetDesktopWindow();
+    }
+    check_hr(device_->SetCooperativeLevel(hwnd, DISCL_BACKGROUND | DISCL_NONEXCLUSIVE), "SetCooperativeLevel");
+    device_->Acquire();
+}
+
+DirectInputButtonInput::~DirectInputButtonInput() {
+    if (device_) {
+        device_->Unacquire();
+        device_->Release();
+    }
+    if (direct_input_) {
+        direct_input_->Release();
+    }
+}
+
+std::optional<bool> DirectInputButtonInput::read() {
+    if (!device_) {
+        return std::nullopt;
+    }
+
+    HRESULT hr = device_->Poll();
+    if (FAILED(hr)) {
+        device_->Acquire();
+    }
+
+    DIJOYSTATE2 state{};
+    hr = device_->GetDeviceState(sizeof(state), &state);
+    if (FAILED(hr)) {
+        device_->Acquire();
+        return std::nullopt;
+    }
+    return (state.rgbButtons[button_index_] & 0x80) != 0;
+}
+
+std::string DirectInputButtonInput::selected_name() const {
+    return selected_name_;
+}
+
+std::vector<int> DirectInputButtonInput::pressed_buttons(
+    int occurrence,
+    const std::string& name_filter,
+    int max_buttons) {
+    max_buttons = std::max(1, std::min(128, max_buttons));
+
+    IDirectInput8A* direct_input = nullptr;
+    check_hr(
+        DirectInput8Create(GetModuleHandle(nullptr), DIRECTINPUT_VERSION, IID_IDirectInput8A, reinterpret_cast<void**>(&direct_input), nullptr),
+        "DirectInput8Create");
+
+    SelectContext ctx;
+    ctx.direct_input = direct_input;
+    ctx.filter = name_filter;
+    ctx.target_occurrence = std::max(1, occurrence);
+    const HRESULT enum_hr = direct_input->EnumDevices(DI8DEVCLASS_GAMECTRL, select_callback, &ctx, DIEDFL_ATTACHEDONLY);
+    if (FAILED(enum_hr)) {
+        direct_input->Release();
+        check_hr(enum_hr, "EnumDevices");
+    }
+    if (!ctx.selected) {
+        direct_input->Release();
+        throw std::runtime_error("Could not find DirectInput device matching '" + name_filter + "' occurrence " + std::to_string(occurrence));
+    }
+
+    IDirectInputDevice8A* device = ctx.selected;
+    HRESULT hr = device->SetDataFormat(&c_dfDIJoystick2);
+    if (SUCCEEDED(hr)) {
+        HWND hwnd = GetConsoleWindow();
+        if (!hwnd) {
+            hwnd = GetDesktopWindow();
+        }
+        hr = device->SetCooperativeLevel(hwnd, DISCL_BACKGROUND | DISCL_NONEXCLUSIVE);
+    }
+    if (SUCCEEDED(hr)) {
+        device->Acquire();
+        device->Poll();
+    }
+
+    std::vector<int> buttons;
+    DIJOYSTATE2 state{};
+    if (SUCCEEDED(hr) && SUCCEEDED(device->GetDeviceState(sizeof(state), &state))) {
+        for (int button = 1; button <= max_buttons; ++button) {
+            if ((state.rgbButtons[button - 1] & 0x80) != 0) {
+                buttons.push_back(button);
+            }
+        }
+    }
+
+    device->Unacquire();
+    device->Release();
+    direct_input->Release();
+    return buttons;
 }
 
 }  // namespace autorudder::windows

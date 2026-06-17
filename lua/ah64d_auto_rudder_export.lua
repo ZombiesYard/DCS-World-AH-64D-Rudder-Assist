@@ -7,7 +7,9 @@ local AutoRudderExport = AutoRudderExport or {}
 AutoRudderExport.host = "127.0.0.1"
 AutoRudderExport.port = 34380
 AutoRudderExport.rate_hz = 120
+AutoRudderExport.probe_rate_hz = 1
 AutoRudderExport.last_time = 0
+AutoRudderExport.last_probe_time = 0
 AutoRudderExport.socket = nil
 AutoRudderExport.udp = nil
 
@@ -92,6 +94,190 @@ local function find_heading(self_data)
     return nil
 end
 
+local function find_number_by_keys(source, keys)
+    if not source then
+        return nil
+    end
+    for _, key in ipairs(keys) do
+        if type(source[key]) == "number" then
+            return source[key]
+        end
+    end
+    for key, value in pairs(source) do
+        local lower_key = string.lower(tostring(key))
+        for _, wanted in ipairs(keys) do
+            if type(value) == "number" and string.find(lower_key, string.lower(wanted)) then
+                return value
+            end
+        end
+    end
+    return nil
+end
+
+local function optional_number_text(value)
+    if type(value) == "number" then
+        return string.format("%.8f", value)
+    end
+    return ""
+end
+
+local function average_pair(source, key)
+    if not source then
+        return nil
+    end
+    local pair = source[key]
+    if type(pair) ~= "table" then
+        return nil
+    end
+
+    local left = type(pair.left) == "number" and pair.left or nil
+    local right = type(pair.right) == "number" and pair.right or nil
+    if left and right then
+        return (left + right) * 0.5
+    end
+    return left or right
+end
+
+local function average_first_available(source, keys)
+    if not source then
+        return nil
+    end
+    for _, key in ipairs(keys) do
+        local value = average_pair(source, key)
+        if value ~= nil then
+            return value
+        end
+        if type(source[key]) == "number" then
+            return source[key]
+        end
+    end
+    return nil
+end
+
+local function nested_number(source, keys)
+    local current = source
+    for _, key in ipairs(keys) do
+        if type(current) ~= "table" then
+            return nil
+        end
+        current = current[key]
+    end
+    if type(current) == "number" then
+        return current
+    end
+    return nil
+end
+
+local function cockpit_argument(index)
+    if not GetDevice then
+        return nil
+    end
+
+    local ok_panel, panel = pcall(GetDevice, 0)
+    if not ok_panel or not panel or not panel.get_argument_value then
+        return nil
+    end
+
+    local ok_value, value = pcall(function()
+        return panel:get_argument_value(index)
+    end)
+    if ok_value and type(value) == "number" then
+        return value
+    end
+    return nil
+end
+
+local function valid_torque_argument(value)
+    return type(value) == "number" and math.abs(value) > 0.001
+end
+
+local function probe_key_interesting(source_name, path)
+    if source_name == "engine" or source_name == "heli" then
+        return true
+    end
+    local lower = string.lower(path)
+    local terms = {
+        "tail",
+        "anti",
+        "antitorque",
+        "anti_torque",
+        "pedal",
+        "rudder",
+        "yaw",
+        "torque",
+        "tq",
+        "power",
+        "rpm",
+        "rotor",
+        "engine",
+        "eng",
+        "nr",
+        "np",
+        "collect",
+    }
+    for _, term in ipairs(terms) do
+        if string.find(lower, term, 1, true) then
+            return true
+        end
+    end
+    return false
+end
+
+local function safe_probe_text(value)
+    local text = tostring(value or "")
+    text = string.gsub(text, "[,\r\n]", "_")
+    return text
+end
+
+local function add_probe_numbers(out, source_name, value, prefix, depth)
+    if type(value) == "number" then
+        if probe_key_interesting(source_name, prefix) then
+            out[#out + 1] = {
+                source = source_name,
+                key = prefix,
+                value = value,
+            }
+        end
+        return
+    end
+    if type(value) ~= "table" or depth >= 4 then
+        return
+    end
+    for key, child in pairs(value) do
+        local child_key = tostring(key)
+        local child_path = prefix == "" and child_key or (prefix .. "." .. child_key)
+        add_probe_numbers(out, source_name, child, child_path, depth + 1)
+        if #out >= 160 then
+            return
+        end
+    end
+end
+
+local function send_power_probe(now, aircraft)
+    if now - AutoRudderExport.last_probe_time < (1 / AutoRudderExport.probe_rate_hz) then
+        return
+    end
+    AutoRudderExport.last_probe_time = now
+
+    local values = {}
+    local engine = LoGetEngineInfo and LoGetEngineInfo() or nil
+    local fm = LoGetHelicopterFMData and LoGetHelicopterFMData() or nil
+    local mech = LoGetMechInfo and LoGetMechInfo() or nil
+    add_probe_numbers(values, "engine", engine, "", 0)
+    add_probe_numbers(values, "heli", fm, "", 0)
+    add_probe_numbers(values, "mech", mech, "", 0)
+
+    for _, item in ipairs(values) do
+        AutoRudderExport.udp:send(string.format(
+            "ARP,%.3f,%s,%s,%s,%.8f\n",
+            now,
+            safe_probe_text(aircraft),
+            safe_probe_text(item.source),
+            safe_probe_text(item.key),
+            item.value))
+    end
+end
+
 local function export_frame()
     if not ensure_socket() then
         return
@@ -113,13 +299,59 @@ local function export_frame()
         aircraft = tostring(self_data.Name)
     end
 
+    send_power_probe(now, aircraft)
+
     local angular = LoGetAngularVelocity and LoGetAngularVelocity() or nil
+    local fm = LoGetHelicopterFMData and LoGetHelicopterFMData() or nil
+    local angle_of_attack = LoGetAngleOfAttack and LoGetAngleOfAttack() or nil
+    local indicated_airspeed = LoGetIndicatedAirSpeed and LoGetIndicatedAirSpeed() or nil
+    local radar_altitude = LoGetAltitudeAboveGroundLevel and LoGetAltitudeAboveGroundLevel() or nil
+    local mech = LoGetMechInfo and LoGetMechInfo() or nil
+    local engine = LoGetEngineInfo and LoGetEngineInfo() or nil
+    local gear_position = find_number_by_keys(mech, { "gear", "Gear" })
+    local flaps_position = find_number_by_keys(mech, { "flaps", "Flaps", "flap", "Flap" })
+    local rpm_avg = average_pair(engine, "RPM")
+    local fuel_avg = average_pair(engine, "FuelConsumption")
+    local torque_left_arg = cockpit_argument(982)
+    local torque_right_arg = cockpit_argument(983)
+    local torque_arg_avg = nil
+    if valid_torque_argument(torque_left_arg) and valid_torque_argument(torque_right_arg) then
+        torque_arg_avg = (torque_left_arg + torque_right_arg) * 0.5
+    elseif valid_torque_argument(torque_left_arg) then
+        torque_arg_avg = torque_left_arg
+    elseif valid_torque_argument(torque_right_arg) then
+        torque_arg_avg = torque_right_arg
+    else
+        torque_arg_avg = nil
+    end
+    local torque_avg =
+        torque_arg_avg or
+        average_first_available(engine, { "Torque", "torque", "TQ", "tq", "EngineTorque", "engineTorque", "engine_torque", "MastTorque", "mast_torque" }) or
+        average_first_available(fm, { "Torque", "torque", "TQ", "tq", "EngineTorque", "engineTorque", "engine_torque", "MastTorque", "mast_torque" })
+    local tail_rudder_left = nested_number(mech, { "controlsurfaces", "rudder", "left" })
+    local tail_rudder_right = nested_number(mech, { "controlsurfaces", "rudder", "right" })
     local yaw_z = angular and safe_number(angular.z) or 0
+    local yaw_y = angular and safe_number(angular.y) or 0
+    local yaw_accel_z = nested_number(fm, { "angular_acceleration", "z" })
     local slip = LoGetSlipBallPosition and safe_number(LoGetSlipBallPosition()) or 0
     local collective = find_collective()
     local heading = find_heading(self_data)
     local collective_text = ""
     local heading_text = ""
+    local aoa_text = ""
+    local roll_rate_text = ""
+    local ias_text = ""
+    local agl_text = ""
+    local gear_text = ""
+    local flaps_text = ""
+    local rpm_text = optional_number_text(rpm_avg)
+    local fuel_text = optional_number_text(fuel_avg)
+    local torque_text = optional_number_text(torque_avg)
+    local torque_left_text = optional_number_text(torque_left_arg)
+    local torque_right_text = optional_number_text(torque_right_arg)
+    local tail_left_text = optional_number_text(tail_rudder_left)
+    local tail_right_text = optional_number_text(tail_rudder_right)
+    local yaw_accel_text = optional_number_text(yaw_accel_z)
     if collective ~= nil then
         if collective < 0 then collective = 0 end
         if collective > 1 then collective = 1 end
@@ -128,8 +360,48 @@ local function export_frame()
     if heading ~= nil then
         heading_text = string.format("%.8f", heading)
     end
+    if type(angle_of_attack) == "number" then
+        aoa_text = string.format("%.8f", angle_of_attack)
+    end
+    if angular and type(angular.x) == "number" then
+        roll_rate_text = string.format("%.8f", angular.x)
+    end
+    if type(indicated_airspeed) == "number" then
+        ias_text = string.format("%.8f", indicated_airspeed)
+    end
+    if type(radar_altitude) == "number" then
+        agl_text = string.format("%.8f", radar_altitude)
+    end
+    if type(gear_position) == "number" then
+        gear_text = string.format("%.8f", gear_position)
+    end
+    if type(flaps_position) == "number" then
+        flaps_text = string.format("%.8f", flaps_position)
+    end
 
-    AutoRudderExport.udp:send(string.format("AR1,%.3f,%s,%.8f,%.8f,%s,%s\n", now, aircraft, yaw_z, slip, collective_text, heading_text))
+    AutoRudderExport.udp:send(string.format(
+        "AR1,%.3f,%s,%.8f,%.8f,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%.8f\n",
+        now,
+        aircraft,
+        yaw_z,
+        slip,
+        collective_text,
+        heading_text,
+        aoa_text,
+        roll_rate_text,
+        ias_text,
+        agl_text,
+        gear_text,
+        flaps_text,
+        rpm_text,
+        fuel_text,
+        tail_left_text,
+        tail_right_text,
+        yaw_accel_text,
+        torque_text,
+        torque_left_text,
+        torque_right_text,
+        yaw_y))
 end
 
 local previous_after_next_frame = LuaExportAfterNextFrame

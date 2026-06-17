@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <mutex>
 #include <stdexcept>
 #include <vector>
 
@@ -16,6 +17,8 @@ constexpr UINT HID_USAGE_RY = 0x34;
 constexpr UINT HID_USAGE_RZ = 0x35;
 constexpr UINT HID_USAGE_SL0 = 0x36;
 constexpr UINT HID_USAGE_SL1 = 0x37;
+
+using VJoyEnabledProc = BOOL(__cdecl*)();
 
 std::string uppercase(std::string value) {
     std::transform(value.begin(), value.end(), value.begin(), [](unsigned char ch) {
@@ -51,23 +54,46 @@ HMODULE load_vjoy_library() {
     return nullptr;
 }
 
+HMODULE shared_vjoy_library() {
+    static std::mutex mutex;
+    static HMODULE library = nullptr;
+    std::lock_guard lock(mutex);
+    if (!library) {
+        library = load_vjoy_library();
+    }
+    return library;
+}
+
+bool shared_vjoy_enabled(HMODULE library) {
+    static std::mutex mutex;
+    static bool checked = false;
+    static bool enabled = false;
+    std::lock_guard lock(mutex);
+    if (!checked) {
+        const auto vjoy_enabled = reinterpret_cast<VJoyEnabledProc>(VJoyDevice::require_proc(library, "vJoyEnabled"));
+        enabled = vjoy_enabled() == TRUE;
+        checked = true;
+    }
+    return enabled;
+}
+
 }  // namespace
 
 VJoyDevice::VJoyDevice(int id, const std::string& axis_name)
     : id_(static_cast<UINT>(id)), axis_(axis_usage(axis_name)) {
-    library_ = load_vjoy_library();
+    library_ = shared_vjoy_library();
     if (!library_) {
         throw std::runtime_error("Could not load vJoyInterface.dll. Install vJoy and ensure the DLL is on PATH.");
     }
 
-    const auto vjoy_enabled = load_proc<VJoyEnabledFn>(library_, "vJoyEnabled");
     const auto get_status = load_proc<GetVJDStatusFn>(library_, "GetVJDStatus");
     const auto acquire = load_proc<AcquireVJDFn>(library_, "AcquireVJD");
     relinquish_ = load_proc<RelinquishVJDFn>(library_, "RelinquishVJD");
     const auto reset = load_proc<ResetVJDFn>(library_, "ResetVJD");
     set_axis_ = load_proc<SetAxisFn>(library_, "SetAxis");
+    set_button_ = load_proc<SetBtnFn>(library_, "SetBtn");
 
-    if (!vjoy_enabled()) {
+    if (!shared_vjoy_enabled(library_)) {
         throw std::runtime_error("vJoy driver is not enabled");
     }
 
@@ -80,54 +106,84 @@ VJoyDevice::VJoyDevice(int id, const std::string& axis_name)
     }
     reset(id_);
 
-    const auto get_axis_min = reinterpret_cast<GetAxisRangeFn>(GetProcAddress(library_, "GetVJDAxisMin"));
-    const auto get_axis_max = reinterpret_cast<GetAxisRangeFn>(GetProcAddress(library_, "GetVJDAxisMax"));
-    if (get_axis_min) {
-        get_axis_min(id_, axis_, &axis_min_);
+    get_axis_min_ = reinterpret_cast<GetAxisRangeFn>(GetProcAddress(library_, "GetVJDAxisMin"));
+    get_axis_max_ = reinterpret_cast<GetAxisRangeFn>(GetProcAddress(library_, "GetVJDAxisMax"));
+    if (get_axis_min_) {
+        get_axis_min_(id_, axis_, &axis_min_);
     }
-    if (get_axis_max) {
-        get_axis_max(id_, axis_, &axis_max_);
+    if (get_axis_max_) {
+        get_axis_max_(id_, axis_, &axis_max_);
     }
+    axis_ranges_[axis_] = {axis_min_, axis_max_};
 }
 
 VJoyDevice::~VJoyDevice() {
     if (relinquish_) {
         relinquish_(id_);
     }
-    if (library_) {
-        FreeLibrary(library_);
-    }
 }
 
 void VJoyDevice::set_axis(double value) {
+    set_axis(axis_, value);
+}
+
+void VJoyDevice::set_axis(const std::string& axis_name, double value) {
+    set_axis(axis_usage(axis_name), value);
+}
+
+void VJoyDevice::set_button(int button_number, bool pressed) {
+    if (button_number < 1 || button_number > 128) {
+        throw std::runtime_error("vJoy button_number must be in [1, 128]");
+    }
+    if (!set_button_(pressed ? TRUE : FALSE, id_, static_cast<UCHAR>(button_number))) {
+        throw std::runtime_error("SetBtn failed for vJoy device " + std::to_string(id_));
+    }
+}
+
+void VJoyDevice::set_axis(UINT axis, double value) {
     value = std::max(-1.0, std::min(1.0, value));
+    const auto [axis_min, axis_max] = axis_range(axis);
     const double normalized = (value + 1.0) * 0.5;
-    const auto raw = static_cast<LONG>(axis_min_ + normalized * static_cast<double>(axis_max_ - axis_min_));
-    if (!set_axis_(raw, id_, axis_)) {
+    const auto raw = static_cast<LONG>(axis_min + normalized * static_cast<double>(axis_max - axis_min));
+    if (!set_axis_(raw, id_, axis)) {
         throw std::runtime_error("SetAxis failed for vJoy device " + std::to_string(id_));
     }
 }
 
+std::pair<LONG, LONG> VJoyDevice::axis_range(UINT axis) {
+    if (const auto found = axis_ranges_.find(axis); found != axis_ranges_.end()) {
+        return found->second;
+    }
+
+    LONG axis_min = axis_min_;
+    LONG axis_max = axis_max_;
+    if (get_axis_min_) {
+        get_axis_min_(id_, axis, &axis_min);
+    }
+    if (get_axis_max_) {
+        get_axis_max_(id_, axis, &axis_max);
+    }
+    axis_ranges_[axis] = {axis_min, axis_max};
+    return {axis_min, axis_max};
+}
+
 std::vector<VJoyDeviceStatus> VJoyDevice::list_statuses() {
     std::vector<VJoyDeviceStatus> statuses;
-    HMODULE library = load_vjoy_library();
+    HMODULE library = shared_vjoy_library();
     if (!library) {
         statuses.push_back({0, "vJoyInterface.dll not found"});
         return statuses;
     }
 
-    const auto vjoy_enabled = reinterpret_cast<VJoyEnabledFn>(GetProcAddress(library, "vJoyEnabled"));
     const auto get_status = reinterpret_cast<GetVJDStatusFn>(GetProcAddress(library, "GetVJDStatus"));
-    if (!vjoy_enabled || !get_status || !vjoy_enabled()) {
+    if (!get_status || !shared_vjoy_enabled(library)) {
         statuses.push_back({0, "vJoy driver not enabled"});
-        FreeLibrary(library);
         return statuses;
     }
 
     for (int id = 1; id <= 16; ++id) {
         statuses.push_back({id, status_name(get_status(static_cast<UINT>(id)))});
     }
-    FreeLibrary(library);
     return statuses;
 }
 

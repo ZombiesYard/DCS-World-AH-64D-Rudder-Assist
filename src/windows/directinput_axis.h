@@ -50,4 +50,23 @@ private:
     std::string selected_name_;
 };
 
+class DirectInputButtonInput {
+public:
+    DirectInputButtonInput(int occurrence, const std::string& name_filter, int button_number);
+    ~DirectInputButtonInput();
+
+    DirectInputButtonInput(const DirectInputButtonInput&) = delete;
+    DirectInputButtonInput& operator=(const DirectInputButtonInput&) = delete;
+
+    std::optional<bool> read();
+    std::string selected_name() const;
+    static std::vector<int> pressed_buttons(int occurrence, const std::string& name_filter, int max_buttons = 32);
+
+private:
+    IDirectInput8A* direct_input_ = nullptr;
+    IDirectInputDevice8A* device_ = nullptr;
+    int button_index_ = 0;
+    std::string selected_name_;
+};
+
 }  // namespace autorudder::windows

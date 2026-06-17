@@ -9,8 +9,12 @@ namespace autorudder {
 struct TuneConfig {
     double kp = 0.0;
     double heading_hold_max_assist = 0.0;
+    std::string collective_feedforward_mode = "linear";
     double collective_gain = 0.0;
+    double collective_zero_thrust = 0.0;
+    double collective_power_exponent = 1.5;
     double collective_rate_gain = 0.0;
+    double collective_rate_limit = 0.0;
     double collective_sign = -1.0;
 };
 
@@ -28,13 +32,16 @@ struct TuneSample {
     bool input_valid = false;
     bool heading_valid = false;
     bool collective_valid = false;
+    bool collective_drive_active = false;
     bool heading_hold_mode = false;
+    bool closed_loop_heading_hold = false;
 };
 
 struct TuneReport {
     int raw_samples = 0;
     double usable_seconds = 0.0;
     double excluded_unstable_seconds = 0.0;
+    double collective_drive_seconds = 0.0;
     double normal_seconds = 0.0;
     double heading_rate_rms = 0.0;
     double heading_rate_peak = 0.0;
@@ -42,10 +49,12 @@ struct TuneReport {
     double saturation_ratio = 0.0;
     double oscillation_rate = 0.0;
     double static_collective_seconds = 0.0;
+    double static_gain_fit_seconds = 0.0;
     double static_feedback_mean = 0.0;
     double collective_transient_seconds = 0.0;
     double collective_transient_rms = 0.0;
     double collective_transient_peak = 0.0;
+    double collective_rate_limited_ratio = 0.0;
     std::optional<double> recommended_collective_gain;
     std::optional<double> recommended_collective_rate_gain;
     std::optional<double> recommended_kp;
@@ -72,6 +81,7 @@ private:
     int raw_samples_ = 0;
     double usable_seconds_ = 0.0;
     double excluded_unstable_seconds_ = 0.0;
+    double collective_drive_seconds_ = 0.0;
     double normal_seconds_ = 0.0;
     double heading_rate_sq_seconds_ = 0.0;
     double heading_rate_peak_ = 0.0;
@@ -80,11 +90,13 @@ private:
     int heading_rate_sign_changes_ = 0;
     int last_heading_rate_sign_ = 0;
     double static_collective_seconds_ = 0.0;
+    double static_gain_fit_seconds_ = 0.0;
     double static_feedback_seconds_ = 0.0;
     double static_gain_delta_seconds_ = 0.0;
     double collective_transient_seconds_ = 0.0;
     double collective_transient_sq_seconds_ = 0.0;
     double collective_transient_peak_ = 0.0;
+    double collective_rate_limited_seconds_ = 0.0;
 };
 
 TuneUpdate choose_tune_update(const TuneConfig& current, const TuneReport& report);

@@ -10,14 +10,17 @@ struct YawDamperInput {
     double dt = 0.01;
     double physical_rudder = 0.0;
     double yaw_rate_z = 0.0;
+    double yaw_acceleration_z = 0.0;
     double heading = 0.0;
     double collective = 0.0;
     bool heading_valid = false;
+    bool yaw_acceleration_valid = false;
     bool collective_valid = false;
     bool telemetry_fresh = false;
     bool aircraft_is_ah64 = false;
     bool input_valid = true;
     bool assist_enabled = true;
+    bool trim_guard_active = false;
 };
 
 struct YawDamperOutput {
@@ -29,6 +32,8 @@ struct YawDamperOutput {
     double collective = 0.0;
     double collective_rate = 0.0;
     double filtered_yaw_rate = 0.0;
+    double filtered_yaw_acceleration = 0.0;
+    double yaw_acceleration_assist = 0.0;
     double heading_rate = 0.0;
     double yaw_rate_command = 0.0;
     double heading = 0.0;
@@ -52,7 +57,9 @@ private:
     bool has_last_physical_ = false;
     double last_physical_ = 0.0;
     double filtered_yaw_rate_ = 0.0;
+    double filtered_yaw_acceleration_ = 0.0;
     double integrated_yaw_rate_ = 0.0;
+    double yaw_rate_error_integral_ = 0.0;
     double trim_bias_ = 0.0;
     double trim_candidate_ = 0.0;
     double trim_candidate_yaw_abs_ = 0.0;
@@ -60,6 +67,9 @@ private:
     bool last_user_override_ = false;
     bool has_last_collective_ = false;
     double last_collective_ = 0.0;
+    double collective_rate_term_ = 0.0;
+    double collective_rate_target_term_ = 0.0;
+    double collective_rate_hold_timer_ = 0.0;
     double assist_offset_ = 0.0;
     bool has_heading_ref_ = false;
     double heading_ref_ = 0.0;

@@ -4,6 +4,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <ws2tcpip.h>
@@ -56,10 +57,73 @@ std::optional<FastExportTelemetry> parse_line(const std::string& line) {
         if (fields.size() >= 7 && !fields[6].empty()) {
             telemetry.heading = std::stod(fields[6]);
         }
+        if (fields.size() >= 8 && !fields[7].empty()) {
+            telemetry.angle_of_attack = std::stod(fields[7]);
+        }
+        if (fields.size() >= 9 && !fields[8].empty()) {
+            telemetry.roll_rate_x = std::stod(fields[8]);
+        }
+        if (fields.size() >= 10 && !fields[9].empty()) {
+            telemetry.indicated_airspeed = std::stod(fields[9]);
+        }
+        if (fields.size() >= 11 && !fields[10].empty()) {
+            telemetry.radar_altitude = std::stod(fields[10]);
+        }
+        if (fields.size() >= 12 && !fields[11].empty()) {
+            telemetry.gear_position = std::stod(fields[11]);
+        }
+        if (fields.size() >= 13 && !fields[12].empty()) {
+            telemetry.flaps_position = std::stod(fields[12]);
+        }
+        if (fields.size() >= 14 && !fields[13].empty()) {
+            telemetry.engine_rpm_avg = std::stod(fields[13]);
+        }
+        if (fields.size() >= 15 && !fields[14].empty()) {
+            telemetry.engine_fuel_flow_avg = std::stod(fields[14]);
+        }
+        if (fields.size() >= 16 && !fields[15].empty()) {
+            telemetry.tail_rudder_left = std::stod(fields[15]);
+        }
+        if (fields.size() >= 17 && !fields[16].empty()) {
+            telemetry.tail_rudder_right = std::stod(fields[16]);
+        }
+        if (fields.size() >= 18 && !fields[17].empty()) {
+            telemetry.yaw_acceleration_z = std::stod(fields[17]);
+        }
+        if (fields.size() >= 19 && !fields[18].empty()) {
+            telemetry.engine_torque_avg = std::stod(fields[18]);
+        }
+        if (fields.size() >= 20 && !fields[19].empty()) {
+            telemetry.engine_torque_left = std::stod(fields[19]);
+        }
+        if (fields.size() >= 21 && !fields[20].empty()) {
+            telemetry.engine_torque_right = std::stod(fields[20]);
+        }
+        if (fields.size() >= 22 && !fields[21].empty()) {
+            telemetry.yaw_rate_y = std::stod(fields[21]);
+        }
     } catch (const std::exception&) {
         return std::nullopt;
     }
     return telemetry;
+}
+
+std::optional<FastExportProbeValue> parse_probe_line(const std::string& line) {
+    const auto fields = split_csv(line);
+    if (fields.size() < 6 || fields[0] != "ARP") {
+        return std::nullopt;
+    }
+
+    FastExportProbeValue value;
+    value.aircraft_name = fields[2];
+    value.source = fields[3];
+    value.key = fields[4];
+    try {
+        value.value = std::stod(fields[5]);
+    } catch (const std::exception&) {
+        return std::nullopt;
+    }
+    return value;
 }
 
 }  // namespace
@@ -99,9 +163,12 @@ int FastExportUdpClient::pump() {
         const int received = recv(socket_, buffer.data(), static_cast<int>(buffer.size() - 1), 0);
         if (received > 0) {
             buffer[static_cast<std::size_t>(received)] = '\0';
-            if (auto parsed = parse_line(std::string(buffer.data(), static_cast<std::size_t>(received)))) {
+            const std::string line(buffer.data(), static_cast<std::size_t>(received));
+            if (auto parsed = parse_line(line)) {
                 latest_ = *parsed;
                 last_frame_time_ = std::chrono::steady_clock::now();
+            } else if (auto probe = parse_probe_line(line)) {
+                probe_values_.push_back(*probe);
             }
             ++packets;
             continue;
@@ -125,6 +192,12 @@ bool FastExportUdpClient::has_recent_frame(double stale_timeout_seconds) const {
 
 std::optional<FastExportTelemetry> FastExportUdpClient::latest() const {
     return latest_;
+}
+
+std::vector<FastExportProbeValue> FastExportUdpClient::drain_probe_values() {
+    std::vector<FastExportProbeValue> values = std::move(probe_values_);
+    probe_values_.clear();
+    return values;
 }
 
 }  // namespace autorudder::windows
