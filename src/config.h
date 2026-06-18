@@ -23,7 +23,7 @@ struct AppConfig {
     double rudder_input_deadzone = 0.0;
     double rudder_input_scale = 1.0;
 
-    double ah64_roll_enabled = 1.0;
+    double ah64_roll_enabled = 0.0;
     int ah64_roll_input_id = 1;
     std::string ah64_roll_device_name_contains = "Joystick - HOTAS Warthog";
     std::string ah64_roll_axis_name = "X";

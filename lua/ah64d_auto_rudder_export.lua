@@ -121,6 +121,31 @@ local function optional_number_text(value)
     return ""
 end
 
+local function vector_number(source, key)
+    if type(source) ~= "table" then
+        return nil
+    end
+    local value = source[key]
+    if type(value) == "number" then
+        return value
+    end
+    return nil
+end
+
+local function vector_speed(x, y, z)
+    if type(x) == "number" and type(y) == "number" and type(z) == "number" then
+        return math.sqrt(x * x + y * y + z * z)
+    end
+    return nil
+end
+
+local function horizontal_speed_xz(x, z)
+    if type(x) == "number" and type(z) == "number" then
+        return math.sqrt(x * x + z * z)
+    end
+    return nil
+end
+
 local function average_pair(source, key)
     if not source then
         return nil
@@ -214,6 +239,14 @@ local function probe_key_interesting(source_name, path)
         "nr",
         "np",
         "collect",
+        "pitch",
+        "bank",
+        "roll",
+        "speed",
+        "velocity",
+        "accel",
+        "alt",
+        "height",
     }
     for _, term in ipairs(terms) do
         if string.find(lower, term, 1, true) then
@@ -305,9 +338,45 @@ local function export_frame()
     local fm = LoGetHelicopterFMData and LoGetHelicopterFMData() or nil
     local angle_of_attack = LoGetAngleOfAttack and LoGetAngleOfAttack() or nil
     local indicated_airspeed = LoGetIndicatedAirSpeed and LoGetIndicatedAirSpeed() or nil
+    local true_airspeed = LoGetTrueAirSpeed and LoGetTrueAirSpeed() or nil
+    local mach = LoGetMachNumber and LoGetMachNumber() or nil
     local radar_altitude = LoGetAltitudeAboveGroundLevel and LoGetAltitudeAboveGroundLevel() or nil
+    local altitude_msl = LoGetAltitudeAboveSeaLevel and LoGetAltitudeAboveSeaLevel() or nil
+    local vertical_velocity = LoGetVerticalVelocity and LoGetVerticalVelocity() or nil
+    local velocity = LoGetVectorVelocity and LoGetVectorVelocity() or nil
+    local wind_velocity = LoGetVectorWindVelocity and LoGetVectorWindVelocity() or nil
+    local acceleration = LoGetAccelerationUnits and LoGetAccelerationUnits() or nil
     local mech = LoGetMechInfo and LoGetMechInfo() or nil
     local engine = LoGetEngineInfo and LoGetEngineInfo() or nil
+    local pitch, bank, yaw = nil, nil, nil
+    if LoGetADIPitchBankYaw then
+        pitch, bank, yaw = LoGetADIPitchBankYaw()
+    end
+    if type(pitch) ~= "number" and self_data and type(self_data.Pitch) == "number" then
+        pitch = self_data.Pitch
+    end
+    if type(bank) ~= "number" and self_data and type(self_data.Bank) == "number" then
+        bank = self_data.Bank
+    end
+    if type(yaw) ~= "number" and self_data and type(self_data.Heading) == "number" then
+        yaw = self_data.Heading
+    end
+    local lat = nested_number(self_data, { "LatLongAlt", "Lat" })
+    local lon = nested_number(self_data, { "LatLongAlt", "Long" })
+    if type(altitude_msl) ~= "number" then
+        altitude_msl = nested_number(self_data, { "LatLongAlt", "Alt" })
+    end
+    local velocity_x = vector_number(velocity, "x")
+    local velocity_y = vector_number(velocity, "y")
+    local velocity_z = vector_number(velocity, "z")
+    local speed_3d = vector_speed(velocity_x, velocity_y, velocity_z)
+    local ground_speed = horizontal_speed_xz(velocity_x, velocity_z)
+    local accel_x = vector_number(acceleration, "x")
+    local accel_y = vector_number(acceleration, "y")
+    local accel_z = vector_number(acceleration, "z")
+    local wind_x = vector_number(wind_velocity, "x")
+    local wind_y = vector_number(wind_velocity, "y")
+    local wind_z = vector_number(wind_velocity, "z")
     local gear_position = find_number_by_keys(mech, { "gear", "Gear" })
     local flaps_position = find_number_by_keys(mech, { "flaps", "Flaps", "flap", "Flap" })
     local rpm_avg = average_pair(engine, "RPM")
@@ -352,6 +421,26 @@ local function export_frame()
     local tail_left_text = optional_number_text(tail_rudder_left)
     local tail_right_text = optional_number_text(tail_rudder_right)
     local yaw_accel_text = optional_number_text(yaw_accel_z)
+    local pitch_text = optional_number_text(pitch)
+    local bank_text = optional_number_text(bank)
+    local yaw_text = optional_number_text(yaw)
+    local velocity_x_text = optional_number_text(velocity_x)
+    local velocity_y_text = optional_number_text(velocity_y)
+    local velocity_z_text = optional_number_text(velocity_z)
+    local speed_3d_text = optional_number_text(speed_3d)
+    local ground_speed_text = optional_number_text(ground_speed)
+    local vertical_velocity_text = optional_number_text(vertical_velocity)
+    local true_airspeed_text = optional_number_text(true_airspeed)
+    local mach_text = optional_number_text(mach)
+    local altitude_msl_text = optional_number_text(altitude_msl)
+    local lat_text = optional_number_text(lat)
+    local lon_text = optional_number_text(lon)
+    local accel_x_text = optional_number_text(accel_x)
+    local accel_y_text = optional_number_text(accel_y)
+    local accel_z_text = optional_number_text(accel_z)
+    local wind_x_text = optional_number_text(wind_x)
+    local wind_y_text = optional_number_text(wind_y)
+    local wind_z_text = optional_number_text(wind_z)
     if collective ~= nil then
         if collective < 0 then collective = 0 end
         if collective > 1 then collective = 1 end
@@ -380,7 +469,7 @@ local function export_frame()
     end
 
     AutoRudderExport.udp:send(string.format(
-        "AR1,%.3f,%s,%.8f,%.8f,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%.8f\n",
+        "AR1,%.3f,%s,%.8f,%.8f,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%.8f,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s\n",
         now,
         aircraft,
         yaw_z,
@@ -401,7 +490,27 @@ local function export_frame()
         torque_text,
         torque_left_text,
         torque_right_text,
-        yaw_y))
+        yaw_y,
+        pitch_text,
+        bank_text,
+        yaw_text,
+        velocity_x_text,
+        velocity_y_text,
+        velocity_z_text,
+        speed_3d_text,
+        ground_speed_text,
+        vertical_velocity_text,
+        true_airspeed_text,
+        mach_text,
+        altitude_msl_text,
+        lat_text,
+        lon_text,
+        accel_x_text,
+        accel_y_text,
+        accel_z_text,
+        wind_x_text,
+        wind_y_text,
+        wind_z_text))
 end
 
 local previous_after_next_frame = LuaExportAfterNextFrame

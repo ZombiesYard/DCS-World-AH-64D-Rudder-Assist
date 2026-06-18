@@ -102,6 +102,66 @@ std::optional<FastExportTelemetry> parse_line(const std::string& line) {
         if (fields.size() >= 22 && !fields[21].empty()) {
             telemetry.yaw_rate_y = std::stod(fields[21]);
         }
+        if (fields.size() >= 23 && !fields[22].empty()) {
+            telemetry.pitch = std::stod(fields[22]);
+        }
+        if (fields.size() >= 24 && !fields[23].empty()) {
+            telemetry.bank = std::stod(fields[23]);
+        }
+        if (fields.size() >= 25 && !fields[24].empty()) {
+            telemetry.attitude_yaw = std::stod(fields[24]);
+        }
+        if (fields.size() >= 26 && !fields[25].empty()) {
+            telemetry.velocity_x = std::stod(fields[25]);
+        }
+        if (fields.size() >= 27 && !fields[26].empty()) {
+            telemetry.velocity_y = std::stod(fields[26]);
+        }
+        if (fields.size() >= 28 && !fields[27].empty()) {
+            telemetry.velocity_z = std::stod(fields[27]);
+        }
+        if (fields.size() >= 29 && !fields[28].empty()) {
+            telemetry.speed_3d = std::stod(fields[28]);
+        }
+        if (fields.size() >= 30 && !fields[29].empty()) {
+            telemetry.ground_speed = std::stod(fields[29]);
+        }
+        if (fields.size() >= 31 && !fields[30].empty()) {
+            telemetry.vertical_velocity = std::stod(fields[30]);
+        }
+        if (fields.size() >= 32 && !fields[31].empty()) {
+            telemetry.true_airspeed = std::stod(fields[31]);
+        }
+        if (fields.size() >= 33 && !fields[32].empty()) {
+            telemetry.mach = std::stod(fields[32]);
+        }
+        if (fields.size() >= 34 && !fields[33].empty()) {
+            telemetry.altitude_msl = std::stod(fields[33]);
+        }
+        if (fields.size() >= 35 && !fields[34].empty()) {
+            telemetry.latitude = std::stod(fields[34]);
+        }
+        if (fields.size() >= 36 && !fields[35].empty()) {
+            telemetry.longitude = std::stod(fields[35]);
+        }
+        if (fields.size() >= 37 && !fields[36].empty()) {
+            telemetry.accel_x = std::stod(fields[36]);
+        }
+        if (fields.size() >= 38 && !fields[37].empty()) {
+            telemetry.accel_y = std::stod(fields[37]);
+        }
+        if (fields.size() >= 39 && !fields[38].empty()) {
+            telemetry.accel_z = std::stod(fields[38]);
+        }
+        if (fields.size() >= 40 && !fields[39].empty()) {
+            telemetry.wind_x = std::stod(fields[39]);
+        }
+        if (fields.size() >= 41 && !fields[40].empty()) {
+            telemetry.wind_y = std::stod(fields[40]);
+        }
+        if (fields.size() >= 42 && !fields[41].empty()) {
+            telemetry.wind_z = std::stod(fields[41]);
+        }
     } catch (const std::exception&) {
         return std::nullopt;
     }
@@ -157,7 +217,7 @@ FastExportUdpClient::~FastExportUdpClient() {
 }
 
 int FastExportUdpClient::pump() {
-    std::array<char, 1024> buffer{};
+    std::array<char, 4096> buffer{};
     int packets = 0;
     for (;;) {
         const int received = recv(socket_, buffer.data(), static_cast<int>(buffer.size() - 1), 0);

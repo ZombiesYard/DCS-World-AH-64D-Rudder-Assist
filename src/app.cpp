@@ -895,6 +895,26 @@ struct Telemetry {
     std::optional<double> tail_rudder_left;
     std::optional<double> tail_rudder_right;
     std::optional<double> yaw_acceleration_z;
+    std::optional<double> pitch;
+    std::optional<double> bank;
+    std::optional<double> attitude_yaw;
+    std::optional<double> velocity_x;
+    std::optional<double> velocity_y;
+    std::optional<double> velocity_z;
+    std::optional<double> speed_3d;
+    std::optional<double> ground_speed;
+    std::optional<double> vertical_velocity;
+    std::optional<double> true_airspeed;
+    std::optional<double> mach;
+    std::optional<double> altitude_msl;
+    std::optional<double> latitude;
+    std::optional<double> longitude;
+    std::optional<double> accel_x;
+    std::optional<double> accel_y;
+    std::optional<double> accel_z;
+    std::optional<double> wind_x;
+    std::optional<double> wind_y;
+    std::optional<double> wind_z;
 };
 
 struct TelemetrySample {
@@ -922,6 +942,20 @@ std::string fixed3(double value) {
     std::ostringstream out;
     out << std::fixed << std::setprecision(3) << value;
     return out.str();
+}
+
+std::string fixed6(double value) {
+    std::ostringstream out;
+    out << std::fixed << std::setprecision(6) << value;
+    return out.str();
+}
+
+std::string maybe3(const std::optional<double>& value) {
+    return value ? fixed3(*value) : "NA";
+}
+
+std::string maybe6(const std::optional<double>& value) {
+    return value ? fixed6(*value) : "NA";
 }
 
 double control_yaw_rate(const Telemetry& telemetry) {
@@ -1435,6 +1469,26 @@ TelemetrySample sample_telemetry(Runtime& runtime) {
             sample.telemetry.tail_rudder_left = latest->tail_rudder_left;
             sample.telemetry.tail_rudder_right = latest->tail_rudder_right;
             sample.telemetry.yaw_acceleration_z = latest->yaw_acceleration_z;
+            sample.telemetry.pitch = latest->pitch;
+            sample.telemetry.bank = latest->bank;
+            sample.telemetry.attitude_yaw = latest->attitude_yaw;
+            sample.telemetry.velocity_x = latest->velocity_x;
+            sample.telemetry.velocity_y = latest->velocity_y;
+            sample.telemetry.velocity_z = latest->velocity_z;
+            sample.telemetry.speed_3d = latest->speed_3d;
+            sample.telemetry.ground_speed = latest->ground_speed;
+            sample.telemetry.vertical_velocity = latest->vertical_velocity;
+            sample.telemetry.true_airspeed = latest->true_airspeed;
+            sample.telemetry.mach = latest->mach;
+            sample.telemetry.altitude_msl = latest->altitude_msl;
+            sample.telemetry.latitude = latest->latitude;
+            sample.telemetry.longitude = latest->longitude;
+            sample.telemetry.accel_x = latest->accel_x;
+            sample.telemetry.accel_y = latest->accel_y;
+            sample.telemetry.accel_z = latest->accel_z;
+            sample.telemetry.wind_x = latest->wind_x;
+            sample.telemetry.wind_y = latest->wind_y;
+            sample.telemetry.wind_z = latest->wind_z;
         }
         sample.fresh = runtime.fast_export->has_recent_frame(runtime.cfg.stale_timeout);
         return sample;
@@ -1471,6 +1525,26 @@ TelemetrySample sample_f14_telemetry(F14Runtime& runtime) {
         sample.telemetry.tail_rudder_left = latest->tail_rudder_left;
         sample.telemetry.tail_rudder_right = latest->tail_rudder_right;
         sample.telemetry.yaw_acceleration_z = latest->yaw_acceleration_z;
+        sample.telemetry.pitch = latest->pitch;
+        sample.telemetry.bank = latest->bank;
+        sample.telemetry.attitude_yaw = latest->attitude_yaw;
+        sample.telemetry.velocity_x = latest->velocity_x;
+        sample.telemetry.velocity_y = latest->velocity_y;
+        sample.telemetry.velocity_z = latest->velocity_z;
+        sample.telemetry.speed_3d = latest->speed_3d;
+        sample.telemetry.ground_speed = latest->ground_speed;
+        sample.telemetry.vertical_velocity = latest->vertical_velocity;
+        sample.telemetry.true_airspeed = latest->true_airspeed;
+        sample.telemetry.mach = latest->mach;
+        sample.telemetry.altitude_msl = latest->altitude_msl;
+        sample.telemetry.latitude = latest->latitude;
+        sample.telemetry.longitude = latest->longitude;
+        sample.telemetry.accel_x = latest->accel_x;
+        sample.telemetry.accel_y = latest->accel_y;
+        sample.telemetry.accel_z = latest->accel_z;
+        sample.telemetry.wind_x = latest->wind_x;
+        sample.telemetry.wind_y = latest->wind_y;
+        sample.telemetry.wind_z = latest->wind_z;
     }
     sample.fresh = runtime.fast_export.has_recent_frame(runtime.cfg.stale_timeout);
     return sample;
@@ -1802,6 +1876,28 @@ int run_normal(CliOptions options, AppConfig cfg) {
                  << " yawCtl=" << fixed3(control_yaw_rate(telemetry))
                  << " yawSrc=" << runtime.cfg.yaw_rate_source
                  << " yawAccZ=" << (telemetry.yaw_acceleration_z ? fixed3(*telemetry.yaw_acceleration_z) : "NA")
+                 << " pitch=" << maybe3(telemetry.pitch)
+                 << " bank=" << maybe3(telemetry.bank)
+                 << " attYaw=" << maybe3(telemetry.attitude_yaw)
+                 << " vx=" << maybe3(telemetry.velocity_x)
+                 << " vy=" << maybe3(telemetry.velocity_y)
+                 << " vz=" << maybe3(telemetry.velocity_z)
+                 << " spd3=" << maybe3(telemetry.speed_3d)
+                 << " gs=" << maybe3(telemetry.ground_speed)
+                 << " vs=" << maybe3(telemetry.vertical_velocity)
+                 << " ias=" << maybe3(telemetry.indicated_airspeed)
+                 << " tas=" << maybe3(telemetry.true_airspeed)
+                 << " mach=" << maybe3(telemetry.mach)
+                 << " agl=" << maybe3(telemetry.radar_altitude)
+                 << " msl=" << maybe3(telemetry.altitude_msl)
+                 << " lat=" << maybe6(telemetry.latitude)
+                 << " lon=" << maybe6(telemetry.longitude)
+                 << " ax=" << maybe3(telemetry.accel_x)
+                 << " ay=" << maybe3(telemetry.accel_y)
+                 << " az=" << maybe3(telemetry.accel_z)
+                 << " windX=" << maybe3(telemetry.wind_x)
+                 << " windY=" << maybe3(telemetry.wind_y)
+                 << " windZ=" << maybe3(telemetry.wind_z)
                  << " rCmd=" << fixed3(result.yaw_rate_command)
                  << " hRate=" << fixed3(result.heading_rate)
                  << " hdg=" << (telemetry.heading ? fixed3(*telemetry.heading) : "NA")
@@ -1968,6 +2064,28 @@ int run_tune_session(AppConfig cfg, bool auto_apply, bool drive_collective) {
                  << " yawCtl=" << fixed3(control_yaw_rate(telemetry))
                  << " yawSrc=" << active_cfg.yaw_rate_source
                  << " yawAccZ=" << (telemetry.yaw_acceleration_z ? fixed3(*telemetry.yaw_acceleration_z) : "NA")
+                 << " pitch=" << maybe3(telemetry.pitch)
+                 << " bank=" << maybe3(telemetry.bank)
+                 << " attYaw=" << maybe3(telemetry.attitude_yaw)
+                 << " vx=" << maybe3(telemetry.velocity_x)
+                 << " vy=" << maybe3(telemetry.velocity_y)
+                 << " vz=" << maybe3(telemetry.velocity_z)
+                 << " spd3=" << maybe3(telemetry.speed_3d)
+                 << " gs=" << maybe3(telemetry.ground_speed)
+                 << " vs=" << maybe3(telemetry.vertical_velocity)
+                 << " ias=" << maybe3(telemetry.indicated_airspeed)
+                 << " tas=" << maybe3(telemetry.true_airspeed)
+                 << " mach=" << maybe3(telemetry.mach)
+                 << " agl=" << maybe3(telemetry.radar_altitude)
+                 << " msl=" << maybe3(telemetry.altitude_msl)
+                 << " lat=" << maybe6(telemetry.latitude)
+                 << " lon=" << maybe6(telemetry.longitude)
+                 << " ax=" << maybe3(telemetry.accel_x)
+                 << " ay=" << maybe3(telemetry.accel_y)
+                 << " az=" << maybe3(telemetry.accel_z)
+                 << " windX=" << maybe3(telemetry.wind_x)
+                 << " windY=" << maybe3(telemetry.wind_y)
+                 << " windZ=" << maybe3(telemetry.wind_z)
                  << " hRate=" << fixed3(result.heading_rate)
                  << " hErr=" << fixed3(result.heading_error)
                  << " coll=" << (collective ? fixed3(*collective) : "NA")

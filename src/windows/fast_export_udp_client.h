@@ -30,6 +30,26 @@ struct FastExportTelemetry {
     std::optional<double> tail_rudder_left;
     std::optional<double> tail_rudder_right;
     std::optional<double> yaw_acceleration_z;
+    std::optional<double> pitch;
+    std::optional<double> bank;
+    std::optional<double> attitude_yaw;
+    std::optional<double> velocity_x;
+    std::optional<double> velocity_y;
+    std::optional<double> velocity_z;
+    std::optional<double> speed_3d;
+    std::optional<double> ground_speed;
+    std::optional<double> vertical_velocity;
+    std::optional<double> true_airspeed;
+    std::optional<double> mach;
+    std::optional<double> altitude_msl;
+    std::optional<double> latitude;
+    std::optional<double> longitude;
+    std::optional<double> accel_x;
+    std::optional<double> accel_y;
+    std::optional<double> accel_z;
+    std::optional<double> wind_x;
+    std::optional<double> wind_y;
+    std::optional<double> wind_z;
 };
 
 struct FastExportProbeValue {
