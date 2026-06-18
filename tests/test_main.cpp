@@ -179,7 +179,9 @@ void test_config_loads_power_feedforward_fields() {
             << "fuel_flow_max=0.150\n"
             << "rpm_nominal=100.0\n"
             << "rpm_drop_full_scale=8.0\n"
-            << "rpm_power_gain=0.40\n";
+            << "rpm_power_gain=0.40\n"
+            << "power_proxy_rise_rate_limit=1.20\n"
+            << "power_proxy_fall_rate_limit=0.025\n";
     }
 
     const auto cfg = autorudder::load_config(path);
@@ -191,6 +193,8 @@ void test_config_loads_power_feedforward_fields() {
     expect_near(cfg.rpm_nominal, 100.0, 0.001, "config loads rpm nominal");
     expect_near(cfg.rpm_drop_full_scale, 8.0, 0.001, "config loads rpm full scale");
     expect_near(cfg.rpm_power_gain, 0.40, 0.001, "config loads rpm power gain");
+    expect_near(cfg.power_proxy_rise_rate_limit, 1.20, 0.001, "config loads power proxy rise limit");
+    expect_near(cfg.power_proxy_fall_rate_limit, 0.025, 0.001, "config loads power proxy fall limit");
 }
 
 void test_power_feedforward_collective_source_passthrough() {
@@ -565,6 +569,38 @@ void test_yaw_damper_collective_power_feedforward() {
     const auto output = damper.update(input);
     expect_near(output.collective_feedforward, -0.513, 0.002, "power collective feedforward follows COL2YAW-style curve");
     expect_near(output.final_rudder, -0.513, 0.002, "power collective feedforward reaches rudder output");
+}
+
+void test_yaw_damper_power_proxy_fall_rate_limit_prevents_rudder_release() {
+    autorudder::AppConfig cfg = test_config();
+    cfg.max_assist = 1.0;
+    cfg.collective_sign = -1.0;
+    cfg.collective_feedforward_mode = "linear";
+    cfg.collective_gain = 1.0;
+    cfg.collective_rate_gain = 0.0;
+    cfg.power_proxy_fall_rate_limit = 0.05;
+    cfg.fade_in_time = 0.0;
+    cfg.fade_out_time = 0.0;
+    autorudder::YawDamper damper(cfg);
+
+    autorudder::YawDamperInput input;
+    input.dt = 0.1;
+    input.collective_valid = true;
+    input.telemetry_fresh = true;
+    input.aircraft_is_ah64 = true;
+    input.input_valid = true;
+    input.assist_enabled = true;
+
+    input.collective = 0.50;
+    auto output = damper.update(input);
+    expect_near(output.collective, 0.50, 0.001, "initial power proxy is used directly");
+    expect_near(output.final_rudder, -0.50, 0.001, "initial power proxy sets rudder feedforward");
+
+    input.collective = 0.20;
+    output = damper.update(input);
+    expect_near(output.collective, 0.495, 0.001, "power proxy fall is slew-limited");
+    expect_near(output.collective_feedforward, -0.495, 0.001, "fall limit keeps anti-torque feedforward");
+    expect_near(output.final_rudder, -0.495, 0.001, "fall limit prevents sudden rudder release");
 }
 
 void test_yaw_damper_collective_transient_uses_fast_fade() {
@@ -1692,6 +1728,7 @@ int main() {
     test_yaw_damper_collective_feedforward();
     test_yaw_damper_collective_feedforward_visible_when_stale();
     test_yaw_damper_collective_power_feedforward();
+    test_yaw_damper_power_proxy_fall_rate_limit_prevents_rudder_release();
     test_yaw_damper_collective_transient_uses_fast_fade();
     test_yaw_damper_collective_transient_holds_through_small_bounce();
     test_yaw_damper_collective_rate_deadband_ignores_small_motion();

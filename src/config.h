@@ -89,6 +89,8 @@ struct AppConfig {
     double rpm_nominal = 100.0;
     double rpm_drop_full_scale = 8.0;
     double rpm_power_gain = 0.40;
+    double power_proxy_rise_rate_limit = 0.0;
+    double power_proxy_fall_rate_limit = 0.0;
     std::string collective_source = "auto";
     int collective_input_id = 1;
     std::string collective_device_name_contains;

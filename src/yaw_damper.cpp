@@ -82,6 +82,8 @@ void YawDamper::reset() {
     last_user_override_ = false;
     has_last_collective_ = false;
     last_collective_ = 0.0;
+    has_smoothed_collective_ = false;
+    smoothed_collective_ = 0.0;
     collective_rate_term_ = 0.0;
     collective_rate_target_term_ = 0.0;
     collective_rate_hold_timer_ = 0.0;
@@ -99,7 +101,8 @@ void YawDamper::reset() {
 YawDamperOutput YawDamper::update(const YawDamperInput& input) {
     const double dt = clamp(input.dt, 0.001, 0.2);
     const double physical = clamp_unit(input.physical_rudder);
-    const double collective = clamp(input.collective, 0.0, 1.0);
+    const double raw_collective = clamp(input.collective, 0.0, 1.0);
+    double collective = raw_collective;
 
     if (config_.filter_time <= 0.0) {
         filtered_yaw_rate_ = input.yaw_rate_z;
@@ -176,6 +179,23 @@ YawDamperOutput YawDamper::update(const YawDamperInput& input) {
     double collective_rate = 0.0;
     double collective_feedforward = 0.0;
     if (input.collective_valid) {
+        if (!has_smoothed_collective_) {
+            smoothed_collective_ = raw_collective;
+            has_smoothed_collective_ = true;
+        } else if (raw_collective > smoothed_collective_ && config_.power_proxy_rise_rate_limit > 0.0) {
+            smoothed_collective_ = move_towards(
+                smoothed_collective_,
+                raw_collective,
+                config_.power_proxy_rise_rate_limit * dt);
+        } else if (raw_collective < smoothed_collective_ && config_.power_proxy_fall_rate_limit > 0.0) {
+            smoothed_collective_ = move_towards(
+                smoothed_collective_,
+                raw_collective,
+                config_.power_proxy_fall_rate_limit * dt);
+        } else {
+            smoothed_collective_ = raw_collective;
+        }
+        collective = clamp(smoothed_collective_, 0.0, 1.0);
         collective_rate = has_last_collective_ ? (collective - last_collective_) / dt : 0.0;
         has_last_collective_ = true;
         last_collective_ = collective;
@@ -239,6 +259,8 @@ YawDamperOutput YawDamper::update(const YawDamperInput& input) {
             config_.max_assist);
     } else {
         has_last_collective_ = false;
+        has_smoothed_collective_ = false;
+        smoothed_collective_ = 0.0;
         collective_rate_term_ = 0.0;
         collective_rate_target_term_ = 0.0;
         collective_rate_hold_timer_ = 0.0;

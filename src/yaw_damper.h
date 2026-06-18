@@ -67,6 +67,8 @@ private:
     bool last_user_override_ = false;
     bool has_last_collective_ = false;
     double last_collective_ = 0.0;
+    bool has_smoothed_collective_ = false;
+    double smoothed_collective_ = 0.0;
     double collective_rate_term_ = 0.0;
     double collective_rate_target_term_ = 0.0;
     double collective_rate_hold_timer_ = 0.0;

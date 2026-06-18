@@ -1699,7 +1699,9 @@ int run_normal(CliOptions options, AppConfig cfg) {
         "Power feedforward source: " + runtime.cfg.power_feedforward_source +
         " fuel=[" + fixed3(runtime.cfg.fuel_flow_min) + "," + fixed3(runtime.cfg.fuel_flow_max) + "]" +
         " rpm_nominal=" + fixed3(runtime.cfg.rpm_nominal) +
-        " rpm_gain=" + fixed3(runtime.cfg.rpm_power_gain));
+        " rpm_gain=" + fixed3(runtime.cfg.rpm_power_gain) +
+        " proxy_slew_up=" + fixed3(runtime.cfg.power_proxy_rise_rate_limit) +
+        " proxy_slew_down=" + fixed3(runtime.cfg.power_proxy_fall_rate_limit));
     runtime.logger.info(
         options.dry_run
             ? "Running in dry-run mode"
@@ -1906,6 +1908,7 @@ int run_normal(CliOptions options, AppConfig cfg) {
                  << " coll=" << (collective ? fixed3(*collective) : "NA")
                  << " ffSrc=" << power_ff.source
                  << " ffIn=" << (power_ff.value ? fixed3(*power_ff.value) : "NA")
+                 << " ffCtl=" << (power_ff.value ? fixed3(result.collective) : "NA")
                  << " rpm=" << (telemetry.engine_rpm_avg ? fixed3(*telemetry.engine_rpm_avg) : "NA")
                  << " fuel=" << (telemetry.engine_fuel_flow_avg ? fixed3(*telemetry.engine_fuel_flow_avg) : "NA")
                  << " tq=" << (telemetry.engine_torque_avg ? fixed3(*telemetry.engine_torque_avg) : "NA")
@@ -1983,7 +1986,9 @@ int run_tune_session(AppConfig cfg, bool auto_apply, bool drive_collective) {
         "Power feedforward source: " + active_cfg.power_feedforward_source +
         " fuel=[" + fixed3(active_cfg.fuel_flow_min) + "," + fixed3(active_cfg.fuel_flow_max) + "]" +
         " rpm_nominal=" + fixed3(active_cfg.rpm_nominal) +
-        " rpm_gain=" + fixed3(active_cfg.rpm_power_gain));
+        " rpm_gain=" + fixed3(active_cfg.rpm_power_gain) +
+        " proxy_slew_up=" + fixed3(active_cfg.power_proxy_rise_rate_limit) +
+        " proxy_slew_down=" + fixed3(active_cfg.power_proxy_fall_rate_limit));
     runtime.logger.info("Press " + hotkey.name() + " to toggle assist; Ctrl+C to finish.");
 
     YawDamper damper(active_cfg);
@@ -2091,6 +2096,7 @@ int run_tune_session(AppConfig cfg, bool auto_apply, bool drive_collective) {
                  << " coll=" << (collective ? fixed3(*collective) : "NA")
                  << " ffSrc=" << power_ff.source
                  << " ffIn=" << (power_ff.value ? fixed3(*power_ff.value) : "NA")
+                 << " ffCtl=" << (power_ff.value ? fixed3(result.collective) : "NA")
                  << " rpm=" << (telemetry.engine_rpm_avg ? fixed3(*telemetry.engine_rpm_avg) : "NA")
                  << " fuel=" << (telemetry.engine_fuel_flow_avg ? fixed3(*telemetry.engine_fuel_flow_avg) : "NA")
                  << " tq=" << (telemetry.engine_torque_avg ? fixed3(*telemetry.engine_torque_avg) : "NA")
