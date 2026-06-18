@@ -91,6 +91,9 @@ struct AppConfig {
     double rpm_power_gain = 0.40;
     double power_proxy_rise_rate_limit = 0.0;
     double power_proxy_fall_rate_limit = 0.0;
+    double power_collective_lead_gain = 0.0;
+    double power_collective_lead_invert = 0.0;
+    double power_collective_lead_deadband = 0.02;
     std::string collective_source = "auto";
     int collective_input_id = 1;
     std::string collective_device_name_contains;

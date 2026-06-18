@@ -1234,6 +1234,9 @@ PowerFeedforwardConfig make_power_feedforward_config(const AppConfig& cfg) {
     power.rpm_nominal = cfg.rpm_nominal;
     power.rpm_drop_full_scale = cfg.rpm_drop_full_scale;
     power.rpm_power_gain = cfg.rpm_power_gain;
+    power.collective_lead_gain = cfg.power_collective_lead_gain;
+    power.collective_lead_invert = cfg.power_collective_lead_invert;
+    power.collective_lead_deadband = cfg.power_collective_lead_deadband;
     return power;
 }
 
@@ -1701,7 +1704,10 @@ int run_normal(CliOptions options, AppConfig cfg) {
         " rpm_nominal=" + fixed3(runtime.cfg.rpm_nominal) +
         " rpm_gain=" + fixed3(runtime.cfg.rpm_power_gain) +
         " proxy_slew_up=" + fixed3(runtime.cfg.power_proxy_rise_rate_limit) +
-        " proxy_slew_down=" + fixed3(runtime.cfg.power_proxy_fall_rate_limit));
+        " proxy_slew_down=" + fixed3(runtime.cfg.power_proxy_fall_rate_limit) +
+        " coll_lead_gain=" + fixed3(runtime.cfg.power_collective_lead_gain) +
+        " coll_lead_invert=" + fixed3(runtime.cfg.power_collective_lead_invert) +
+        " coll_lead_db=" + fixed3(runtime.cfg.power_collective_lead_deadband));
     runtime.logger.info(
         options.dry_run
             ? "Running in dry-run mode"
@@ -1988,7 +1994,10 @@ int run_tune_session(AppConfig cfg, bool auto_apply, bool drive_collective) {
         " rpm_nominal=" + fixed3(active_cfg.rpm_nominal) +
         " rpm_gain=" + fixed3(active_cfg.rpm_power_gain) +
         " proxy_slew_up=" + fixed3(active_cfg.power_proxy_rise_rate_limit) +
-        " proxy_slew_down=" + fixed3(active_cfg.power_proxy_fall_rate_limit));
+        " proxy_slew_down=" + fixed3(active_cfg.power_proxy_fall_rate_limit) +
+        " coll_lead_gain=" + fixed3(active_cfg.power_collective_lead_gain) +
+        " coll_lead_invert=" + fixed3(active_cfg.power_collective_lead_invert) +
+        " coll_lead_db=" + fixed3(active_cfg.power_collective_lead_deadband));
     runtime.logger.info("Press " + hotkey.name() + " to toggle assist; Ctrl+C to finish.");
 
     YawDamper damper(active_cfg);

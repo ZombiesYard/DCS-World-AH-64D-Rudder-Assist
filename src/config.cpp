@@ -110,6 +110,18 @@ void apply_key(AppConfig& cfg, const std::string& key, const std::string& value)
         cfg.power_proxy_fall_rate_limit = parse_double(value, key);
         return;
     }
+    if (key == "power_collective_lead_gain") {
+        cfg.power_collective_lead_gain = parse_double(value, key);
+        return;
+    }
+    if (key == "power_collective_lead_invert") {
+        cfg.power_collective_lead_invert = parse_double(value, key);
+        return;
+    }
+    if (key == "power_collective_lead_deadband") {
+        cfg.power_collective_lead_deadband = parse_double(value, key);
+        return;
+    }
     if (key == "ah64_roll_enabled") {
         cfg.ah64_roll_enabled = parse_double(value, key);
         return;
@@ -450,6 +462,15 @@ void validate(const AppConfig& cfg) {
     if (cfg.power_proxy_fall_rate_limit < 0.0 || cfg.power_proxy_fall_rate_limit > 10.0) {
         throw std::runtime_error("power_proxy_fall_rate_limit must be in [0, 10]");
     }
+    if (cfg.power_collective_lead_gain < 0.0 || cfg.power_collective_lead_gain > 1.0) {
+        throw std::runtime_error("power_collective_lead_gain must be in [0, 1]");
+    }
+    if (cfg.power_collective_lead_invert < 0.0 || cfg.power_collective_lead_invert > 1.0) {
+        throw std::runtime_error("power_collective_lead_invert must be in [0, 1]");
+    }
+    if (cfg.power_collective_lead_deadband < 0.0 || cfg.power_collective_lead_deadband > 1.0) {
+        throw std::runtime_error("power_collective_lead_deadband must be in [0, 1]");
+    }
     if (cfg.collective_invert < 0.0 || cfg.collective_invert > 1.0) {
         throw std::runtime_error("collective_invert must be in [0, 1]");
     }
@@ -689,6 +710,9 @@ void write_default_config(const std::filesystem::path& path) {
         << "rpm_power_gain=" << cfg.rpm_power_gain << "\n"
         << "power_proxy_rise_rate_limit=" << cfg.power_proxy_rise_rate_limit << "\n"
         << "power_proxy_fall_rate_limit=" << cfg.power_proxy_fall_rate_limit << "\n"
+        << "power_collective_lead_gain=" << cfg.power_collective_lead_gain << "\n"
+        << "power_collective_lead_invert=" << cfg.power_collective_lead_invert << "\n"
+        << "power_collective_lead_deadband=" << cfg.power_collective_lead_deadband << "\n"
         << "collective_source=" << cfg.collective_source << "\n"
         << "collective_input_id=" << cfg.collective_input_id << "\n"
         << "collective_device_name_contains=" << cfg.collective_device_name_contains << "\n"

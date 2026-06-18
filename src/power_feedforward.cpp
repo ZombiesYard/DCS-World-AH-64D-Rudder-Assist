@@ -24,6 +24,32 @@ double rpm_power_correction(const PowerFeedforwardConfig& config, double rpm) {
     return config.rpm_power_gain * rpm_drop;
 }
 
+double collective_power_demand(const PowerFeedforwardConfig& config, double collective) {
+    double demand = clamp(collective, 0.0, 1.0);
+    if (config.collective_lead_invert > 0.5) {
+        demand = 1.0 - demand;
+    }
+    return demand;
+}
+
+double apply_collective_lead(
+    const PowerFeedforwardConfig& config,
+    double power_proxy,
+    const PowerFeedforwardInput& input,
+    bool& applied) {
+    applied = false;
+    if (config.collective_lead_gain <= 0.0 || !input.collective) {
+        return power_proxy;
+    }
+    const double demand = collective_power_demand(config, *input.collective);
+    const double lead_error = demand - power_proxy - config.collective_lead_deadband;
+    if (lead_error <= 0.0) {
+        return power_proxy;
+    }
+    applied = true;
+    return clamp(power_proxy + config.collective_lead_gain * lead_error, 0.0, 1.0);
+}
+
 }  // namespace
 
 PowerFeedforwardOutput compute_power_feedforward_input(
@@ -39,7 +65,13 @@ PowerFeedforwardOutput compute_power_feedforward_input(
         if (!input.fuel_flow) {
             return {std::nullopt, "fuel_flow_missing"};
         }
-        return {normalize_fuel_flow(config, *input.fuel_flow), "fuel_flow"};
+        bool collective_lead_applied = false;
+        const double value = apply_collective_lead(
+            config,
+            normalize_fuel_flow(config, *input.fuel_flow),
+            input,
+            collective_lead_applied);
+        return {value, collective_lead_applied ? "fuel_flow_collective_lead" : "fuel_flow"};
     }
     if (config.source == "fuel_rpm") {
         if (!input.fuel_flow) {
@@ -49,7 +81,9 @@ PowerFeedforwardOutput compute_power_feedforward_input(
         if (input.rpm) {
             value += rpm_power_correction(config, *input.rpm);
         }
-        return {clamp(value, 0.0, 1.0), "fuel_rpm"};
+        bool collective_lead_applied = false;
+        value = apply_collective_lead(config, clamp(value, 0.0, 1.0), input, collective_lead_applied);
+        return {value, collective_lead_applied ? "fuel_rpm_collective_lead" : "fuel_rpm"};
     }
     return {std::nullopt, "invalid"};
 }

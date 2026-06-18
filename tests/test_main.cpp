@@ -181,7 +181,10 @@ void test_config_loads_power_feedforward_fields() {
             << "rpm_drop_full_scale=8.0\n"
             << "rpm_power_gain=0.40\n"
             << "power_proxy_rise_rate_limit=1.20\n"
-            << "power_proxy_fall_rate_limit=0.025\n";
+            << "power_proxy_fall_rate_limit=0.025\n"
+            << "power_collective_lead_gain=0.35\n"
+            << "power_collective_lead_invert=1\n"
+            << "power_collective_lead_deadband=0.02\n";
     }
 
     const auto cfg = autorudder::load_config(path);
@@ -195,6 +198,9 @@ void test_config_loads_power_feedforward_fields() {
     expect_near(cfg.rpm_power_gain, 0.40, 0.001, "config loads rpm power gain");
     expect_near(cfg.power_proxy_rise_rate_limit, 1.20, 0.001, "config loads power proxy rise limit");
     expect_near(cfg.power_proxy_fall_rate_limit, 0.025, 0.001, "config loads power proxy fall limit");
+    expect_near(cfg.power_collective_lead_gain, 0.35, 0.001, "config loads collective lead gain");
+    expect_near(cfg.power_collective_lead_invert, 1.0, 0.001, "config loads collective lead invert");
+    expect_near(cfg.power_collective_lead_deadband, 0.02, 0.001, "config loads collective lead deadband");
 }
 
 void test_power_feedforward_collective_source_passthrough() {
@@ -250,6 +256,35 @@ void test_power_feedforward_fuel_rpm_requires_fuel() {
     const auto output = autorudder::compute_power_feedforward_input(cfg, input);
     expect_true(output.source == "fuel_rpm_missing", "missing fuel is reported");
     expect_true(!output.value.has_value(), "fuel rpm source does not invent a value without fuel");
+}
+
+void test_power_feedforward_collective_lead_only_increases_proxy() {
+    autorudder::PowerFeedforwardConfig cfg;
+    cfg.source = "fuel_rpm";
+    cfg.fuel_flow_min = 0.050;
+    cfg.fuel_flow_max = 0.150;
+    cfg.rpm_nominal = 100.0;
+    cfg.rpm_drop_full_scale = 10.0;
+    cfg.rpm_power_gain = 0.20;
+    cfg.collective_lead_gain = 0.50;
+    cfg.collective_lead_invert = 1.0;
+    cfg.collective_lead_deadband = 0.02;
+
+    autorudder::PowerFeedforwardInput input;
+    input.fuel_flow = 0.090;
+    input.rpm = 100.0;
+    input.collective = 0.30;
+
+    auto output = autorudder::compute_power_feedforward_input(cfg, input);
+    expect_true(output.source == "fuel_rpm_collective_lead", "collective lead is reported when it raises fuel rpm proxy");
+    expect_true(output.value.has_value(), "collective lead keeps a power value");
+    expect_near(*output.value, 0.54, 0.001, "collective lead adds upward-only demand gap");
+
+    input.collective = 0.90;
+    output = autorudder::compute_power_feedforward_input(cfg, input);
+    expect_true(output.source == "fuel_rpm", "collective lead is not reported when demand is below engine proxy");
+    expect_true(output.value.has_value(), "engine proxy remains available when collective lead is inactive");
+    expect_near(*output.value, 0.40, 0.001, "collective lead does not reduce engine proxy");
 }
 
 autorudder::AppConfig test_config() {
@@ -1719,6 +1754,7 @@ int main() {
     test_power_feedforward_fuel_flow_normalizes();
     test_power_feedforward_fuel_rpm_adds_rpm_drop();
     test_power_feedforward_fuel_rpm_requires_fuel();
+    test_power_feedforward_collective_lead_only_increases_proxy();
     test_yaw_damper_assists_centered_pedals();
     test_yaw_damper_user_override();
     test_yaw_damper_stale_or_wrong_aircraft_passes_through();
