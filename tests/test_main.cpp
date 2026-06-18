@@ -129,6 +129,46 @@ void test_config_loads_yaw_rate_hold_fields() {
     expect_near(cfg.yaw_rate_integral_deadband, 0.012, 0.001, "config loads yaw-rate integral deadband");
 }
 
+void test_config_loads_ah64_roll_fields() {
+    const auto path = std::filesystem::current_path() / "autorudder_test_config.ini";
+    std::filesystem::remove(path);
+    {
+        std::ofstream out(path);
+        out << "ah64_roll_enabled=1\n"
+            << "ah64_roll_input_id=2\n"
+            << "ah64_roll_device_name_contains=Warthog\n"
+            << "ah64_roll_axis_name=RX\n"
+            << "ah64_roll_output_axis_name=Y\n"
+            << "ah64_roll_input_center=0.05\n"
+            << "ah64_roll_input_deadzone=0.03\n"
+            << "ah64_roll_input_scale=-1.20\n"
+            << "ah64_roll_override_threshold=0.25\n"
+            << "ah64_roll_counter_sign=-1\n"
+            << "ah64_roll_counter_gain=0.22\n"
+            << "ah64_roll_counter_max=0.09\n"
+            << "ah64_roll_counter_deadband=0.04\n"
+            << "ah64_roll_counter_fade_time=0.18\n";
+    }
+
+    const auto cfg = autorudder::load_config(path);
+    std::filesystem::remove(path);
+
+    expect_near(cfg.ah64_roll_enabled, 1.0, 0.001, "config loads AH-64D roll enabled");
+    expect_true(cfg.ah64_roll_input_id == 2, "config loads AH-64D roll input id");
+    expect_true(cfg.ah64_roll_device_name_contains == "Warthog", "config loads AH-64D roll device filter");
+    expect_true(cfg.ah64_roll_axis_name == "RX", "config loads AH-64D roll input axis");
+    expect_true(cfg.ah64_roll_output_axis_name == "Y", "config loads AH-64D roll output axis");
+    expect_near(cfg.ah64_roll_input_center, 0.05, 0.001, "config loads AH-64D roll center");
+    expect_near(cfg.ah64_roll_input_deadzone, 0.03, 0.001, "config loads AH-64D roll deadzone");
+    expect_near(cfg.ah64_roll_input_scale, -1.20, 0.001, "config loads AH-64D roll scale");
+    expect_near(cfg.ah64_roll_override_threshold, 0.25, 0.001, "config loads AH-64D roll override threshold");
+    expect_near(cfg.ah64_roll_counter_sign, -1.0, 0.001, "config loads AH-64D roll counter sign");
+    expect_near(cfg.ah64_roll_counter_gain, 0.22, 0.001, "config loads AH-64D roll counter gain");
+    expect_near(cfg.ah64_roll_counter_max, 0.09, 0.001, "config loads AH-64D roll counter max");
+    expect_near(cfg.ah64_roll_counter_deadband, 0.04, 0.001, "config loads AH-64D roll counter deadband");
+    expect_near(cfg.ah64_roll_counter_fade_time, 0.18, 0.001, "config loads AH-64D roll counter fade time");
+}
+
 void test_config_loads_power_feedforward_fields() {
     const auto path = std::filesystem::current_path() / "autorudder_test_config.ini";
     std::filesystem::remove(path);
@@ -1637,6 +1677,7 @@ int main() {
     test_protocol_parser_handles_multiple_frames();
     test_ref_extraction();
     test_config_loads_yaw_rate_hold_fields();
+    test_config_loads_ah64_roll_fields();
     test_config_loads_power_feedforward_fields();
     test_power_feedforward_collective_source_passthrough();
     test_power_feedforward_fuel_flow_normalizes();

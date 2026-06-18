@@ -23,6 +23,21 @@ struct AppConfig {
     double rudder_input_deadzone = 0.0;
     double rudder_input_scale = 1.0;
 
+    double ah64_roll_enabled = 1.0;
+    int ah64_roll_input_id = 1;
+    std::string ah64_roll_device_name_contains = "Joystick - HOTAS Warthog";
+    std::string ah64_roll_axis_name = "X";
+    std::string ah64_roll_output_axis_name = "Y";
+    double ah64_roll_input_center = 0.0;
+    double ah64_roll_input_deadzone = 0.02;
+    double ah64_roll_input_scale = 1.0;
+    double ah64_roll_override_threshold = 0.30;
+    double ah64_roll_counter_sign = -1.0;
+    double ah64_roll_counter_gain = 0.18;
+    double ah64_roll_counter_max = 0.08;
+    double ah64_roll_counter_deadband = 0.04;
+    double ah64_roll_counter_fade_time = 0.20;
+
     std::string control_mode = "heading_hold";
     double assist_sign = -1.0;
     double yaw_response_sign = 1.0;

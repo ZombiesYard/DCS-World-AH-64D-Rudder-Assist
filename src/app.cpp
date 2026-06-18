@@ -1015,9 +1015,11 @@ struct Runtime {
     windows::DcsBiosUdpClient bios;
     std::optional<windows::FastExportUdpClient> fast_export;
     windows::DirectInputAxisInput pedals;
+    std::optional<windows::DirectInputAxisInput> ah64_roll_input;
     std::optional<windows::DirectInputAxisInput> collective_directinput;
     std::optional<windows::XInputAxisInput> collective_xinput;
     std::optional<windows::DirectInputButtonInput> trim_guard_input;
+    std::string ah64_roll_input_error;
     std::string collective_input_error;
     std::string trim_guard_input_error;
 
@@ -1030,6 +1032,16 @@ struct Runtime {
           pedals(cfg.input_vjoy_id, cfg.input_device_name_contains, cfg.axis_name) {
         if (cfg.telemetry_source == "fast_export") {
             fast_export.emplace(cfg.fast_export_bind_address, cfg.fast_export_port);
+        }
+        if (cfg.ah64_roll_enabled > 0.5) {
+            try {
+                ah64_roll_input.emplace(
+                    cfg.ah64_roll_input_id,
+                    cfg.ah64_roll_device_name_contains,
+                    cfg.ah64_roll_axis_name);
+            } catch (const std::exception& ex) {
+                ah64_roll_input_error = ex.what();
+            }
         }
         const auto init_directinput = [&] {
             collective_directinput.emplace(cfg.collective_input_id, cfg.collective_device_name_contains, cfg.collective_axis_name);
@@ -1079,6 +1091,13 @@ struct Runtime {
         return {};
     }
 
+    std::string ah64_roll_input_name() const {
+        if (ah64_roll_input) {
+            return ah64_roll_input->selected_name();
+        }
+        return {};
+    }
+
     std::string trim_guard_input_name() const {
         if (trim_guard_input) {
             return trim_guard_input->selected_name();
@@ -1110,6 +1129,42 @@ struct F14Runtime {
 
 double clamp01(double value) {
     return std::max(0.0, std::min(1.0, value));
+}
+
+double clamp_unit(double value) {
+    return std::max(-1.0, std::min(1.0, value));
+}
+
+double apply_centered_axis_calibration(double raw, double center, double deadzone, double scale) {
+    const double clamped_center = std::clamp(center, -0.95, 0.95);
+    const double span = raw >= clamped_center ? (1.0 - clamped_center) : (clamped_center + 1.0);
+    const double centered = span > 0.000001 ? (raw - clamped_center) / span : 0.0;
+    const double dz = std::clamp(deadzone, 0.0, 0.95);
+    const double magnitude = std::abs(centered);
+    double with_deadzone = 0.0;
+    if (magnitude > dz) {
+        with_deadzone = std::copysign((magnitude - dz) / (1.0 - dz), centered);
+    }
+    return clamp_unit(with_deadzone * scale);
+}
+
+double move_toward(double current, double target, double max_delta) {
+    if (max_delta <= 0.0) {
+        return target;
+    }
+    if (current < target) {
+        return std::min(target, current + max_delta);
+    }
+    return std::max(target, current - max_delta);
+}
+
+double apply_symmetric_deadband(double value, double deadband) {
+    const double dz = std::clamp(deadband, 0.0, 1.0);
+    const double magnitude = std::abs(value);
+    if (magnitude <= dz) {
+        return 0.0;
+    }
+    return std::copysign(magnitude - dz, value);
 }
 
 double directinput_axis_to_collective(double raw_axis, const AppConfig& cfg) {
@@ -1281,6 +1336,22 @@ std::optional<double> read_collective(Runtime& runtime, const Telemetry& telemet
     return std::nullopt;
 }
 
+std::optional<double> read_ah64_roll(Runtime& runtime, std::optional<double>& raw_roll) {
+    raw_roll = std::nullopt;
+    if (runtime.cfg.ah64_roll_enabled <= 0.5 || !runtime.ah64_roll_input) {
+        return std::nullopt;
+    }
+    raw_roll = runtime.ah64_roll_input->read();
+    if (!raw_roll) {
+        return std::nullopt;
+    }
+    return apply_centered_axis_calibration(
+        *raw_roll,
+        runtime.cfg.ah64_roll_input_center,
+        runtime.cfg.ah64_roll_input_deadzone,
+        runtime.cfg.ah64_roll_input_scale);
+}
+
 void log_collective_input(Logger& logger, const Runtime& runtime) {
     const std::string name = runtime.collective_input_name();
     if (!name.empty()) {
@@ -1289,6 +1360,25 @@ void log_collective_input(Logger& logger, const Runtime& runtime) {
         logger.warn("Collective input unavailable: " + runtime.collective_input_error);
     } else {
         logger.info("Collective source: " + runtime.cfg.collective_source);
+    }
+}
+
+void log_ah64_roll_input(Logger& logger, const Runtime& runtime) {
+    if (runtime.cfg.ah64_roll_enabled <= 0.5) {
+        logger.info("AH-64D cyclic roll passthrough disabled");
+        return;
+    }
+    const std::string name = runtime.ah64_roll_input_name();
+    if (!name.empty()) {
+        logger.info(
+            "Selected AH-64D cyclic roll input: " + name +
+            " axis " + runtime.cfg.ah64_roll_axis_name +
+            " -> vJoy #" + std::to_string(runtime.cfg.output_vjoy_id) +
+            " axis " + runtime.cfg.ah64_roll_output_axis_name);
+    } else if (!runtime.ah64_roll_input_error.empty()) {
+        logger.warn("AH-64D cyclic roll input unavailable: " + runtime.ah64_roll_input_error);
+    } else {
+        logger.warn("AH-64D cyclic roll input unavailable");
     }
 }
 
@@ -1526,6 +1616,7 @@ int run_normal(CliOptions options, AppConfig cfg) {
     }
 
     runtime.logger.info("Selected pedal input: " + runtime.pedals.selected_name());
+    log_ah64_roll_input(runtime.logger, runtime);
     log_collective_input(runtime.logger, runtime);
     log_trim_guard_input(runtime.logger, runtime);
     runtime.logger.info("Telemetry source: " + runtime.cfg.telemetry_source);
@@ -1535,11 +1626,15 @@ int run_normal(CliOptions options, AppConfig cfg) {
         " fuel=[" + fixed3(runtime.cfg.fuel_flow_min) + "," + fixed3(runtime.cfg.fuel_flow_max) + "]" +
         " rpm_nominal=" + fixed3(runtime.cfg.rpm_nominal) +
         " rpm_gain=" + fixed3(runtime.cfg.rpm_power_gain));
-    runtime.logger.info(options.dry_run ? "Running in dry-run mode" : "Writing final rudder to vJoy #" + std::to_string(runtime.cfg.output_vjoy_id));
+    runtime.logger.info(
+        options.dry_run
+            ? "Running in dry-run mode"
+            : "Writing final rudder/roll to vJoy #" + std::to_string(runtime.cfg.output_vjoy_id));
     runtime.logger.info("Press " + hotkey.name() + " to toggle assist; Ctrl+C to exit.");
 
     YawDamper damper(runtime.cfg);
     bool assist_enabled = true;
+    double ah64_roll_counter = 0.0;
     auto last = std::chrono::steady_clock::now();
     auto next_log = last;
     const auto loop_period = std::chrono::duration<double>(1.0 / static_cast<double>(runtime.cfg.loop_hz));
@@ -1582,6 +1677,8 @@ int run_normal(CliOptions options, AppConfig cfg) {
         const auto raw_pedal = runtime.pedals.read();
         const std::optional<double> pedal =
             raw_pedal ? std::optional<double>(apply_rudder_input_calibration(*raw_pedal, runtime.cfg)) : std::nullopt;
+        std::optional<double> raw_roll;
+        const std::optional<double> roll = read_ah64_roll(runtime, raw_roll);
         const TelemetrySample sample = sample_telemetry(runtime);
         const Telemetry& telemetry = sample.telemetry;
         const auto collective = read_collective(runtime, telemetry);
@@ -1656,8 +1753,35 @@ int run_normal(CliOptions options, AppConfig cfg) {
         damper_input.trim_guard_active = trim_guard_active;
         const auto result = damper.update(damper_input);
 
+        double ah64_roll_target = 0.0;
+        const bool ah64_roll_counter_allowed =
+            runtime.cfg.ah64_roll_enabled > 0.5 &&
+            roll.has_value() &&
+            sample.fresh &&
+            telemetry.aircraft_is_ah64 &&
+            assist_enabled &&
+            !trim_guard_active &&
+            std::abs(*roll) <= runtime.cfg.ah64_roll_override_threshold;
+        if (ah64_roll_counter_allowed) {
+            const double auto_rudder =
+                apply_symmetric_deadband(result.assist_offset, runtime.cfg.ah64_roll_counter_deadband);
+            ah64_roll_target = std::clamp(
+                runtime.cfg.ah64_roll_counter_sign * runtime.cfg.ah64_roll_counter_gain * auto_rudder,
+                -runtime.cfg.ah64_roll_counter_max,
+                runtime.cfg.ah64_roll_counter_max);
+        }
+        const double roll_step =
+            runtime.cfg.ah64_roll_counter_fade_time <= 0.0
+                ? runtime.cfg.ah64_roll_counter_max
+                : std::max(runtime.cfg.ah64_roll_counter_max, 0.001) * dt / runtime.cfg.ah64_roll_counter_fade_time;
+        ah64_roll_counter = move_toward(ah64_roll_counter, ah64_roll_target, roll_step);
+        const double final_roll = clamp_unit(roll.value_or(0.0) + ah64_roll_counter);
+
         if (output) {
             output->set_axis(result.final_rudder);
+            if (runtime.cfg.ah64_roll_enabled > 0.5) {
+                output->set_axis(runtime.cfg.ah64_roll_output_axis_name, final_roll);
+            }
             if (trim_guard_press_output_this_frame && runtime.cfg.trim_guard_output_button > 0) {
                 output->set_button(runtime.cfg.trim_guard_output_button, true);
                 trim_guard_output_pressed = true;
@@ -1670,8 +1794,11 @@ int run_normal(CliOptions options, AppConfig cfg) {
                  << " fresh=" << (sample.fresh ? "yes" : "no")
                  << " rawPedal=" << fixed3(raw_pedal.value_or(0.0))
                  << " pedal=" << fixed3(pedal.value_or(0.0))
+                 << " rawRoll=" << (raw_roll ? fixed3(*raw_roll) : "NA")
+                 << " roll=" << (roll ? fixed3(*roll) : "NA")
                  << " yawZ=" << fixed3(telemetry.yaw_rate_z)
                  << " angY=" << (telemetry.yaw_rate_y ? fixed3(*telemetry.yaw_rate_y) : "NA")
+                 << " p=" << (telemetry.roll_rate_x ? fixed3(*telemetry.roll_rate_x) : "NA")
                  << " yawCtl=" << fixed3(control_yaw_rate(telemetry))
                  << " yawSrc=" << runtime.cfg.yaw_rate_source
                  << " yawAccZ=" << (telemetry.yaw_acceleration_z ? fixed3(*telemetry.yaw_acceleration_z) : "NA")
@@ -1699,6 +1826,8 @@ int run_normal(CliOptions options, AppConfig cfg) {
                  << " hold=" << fixed3(result.integral_assist)
                  << " trim=" << fixed3(result.trim_bias)
                  << " final=" << fixed3(result.final_rudder)
+                 << " rollCtr=" << fixed3(ah64_roll_counter)
+                 << " finalRoll=" << fixed3(final_roll)
                  << " trimGuard=" << (trim_guard_active ? trim_guard_state_name() : "off")
                  << " mode=" << result.reason;
             if (telemetry.slip_ball) {
@@ -1714,6 +1843,9 @@ int run_normal(CliOptions options, AppConfig cfg) {
     if (output) {
         release_trim_guard_button();
         output->set_axis(0.0);
+        if (runtime.cfg.ah64_roll_enabled > 0.5) {
+            output->set_axis(runtime.cfg.ah64_roll_output_axis_name, 0.0);
+        }
     }
     runtime.logger.info("Stopped");
     return 0;
@@ -1748,6 +1880,7 @@ int run_tune_session(AppConfig cfg, bool auto_apply, bool drive_collective) {
         runtime.logger.info("Auto tune does not edit config.ini; Ctrl+C prints the final active values.");
     }
     runtime.logger.info("Active tune config: " + tune_config_summary(active_cfg));
+    log_ah64_roll_input(runtime.logger, runtime);
     log_collective_input(runtime.logger, runtime);
     runtime.logger.info("Yaw-rate source: " + active_cfg.yaw_rate_source);
     runtime.logger.info(
@@ -1778,6 +1911,8 @@ int run_tune_session(AppConfig cfg, bool auto_apply, bool drive_collective) {
         }
 
         const auto pedal = runtime.pedals.read();
+        std::optional<double> raw_roll;
+        const auto roll = read_ah64_roll(runtime, raw_roll);
         const TelemetrySample sample = sample_telemetry(runtime);
         const Telemetry& telemetry = sample.telemetry;
         const auto physical_collective = read_collective(runtime, telemetry);
@@ -1812,6 +1947,9 @@ int run_tune_session(AppConfig cfg, bool auto_apply, bool drive_collective) {
         damper_input.assist_enabled = assist_enabled;
         const auto result = damper.update(damper_input);
         output.set_axis(result.final_rudder);
+        if (active_cfg.ah64_roll_enabled > 0.5) {
+            output.set_axis(active_cfg.ah64_roll_output_axis_name, roll.value_or(0.0));
+        }
 
         const bool collective_drive_active = drive_output_valid && drive_output.driving;
         add_tune_sample(window_analyzer, dt, pedal, sample, power_ff.value, result, collective_drive_active);
@@ -1822,8 +1960,11 @@ int run_tune_session(AppConfig cfg, bool auto_apply, bool drive_collective) {
             line << "tune acft=" << (telemetry.aircraft_name.empty() ? "NONE" : telemetry.aircraft_name)
                  << " fresh=" << (sample.fresh ? "yes" : "no")
                  << " pedal=" << fixed3(pedal.value_or(0.0))
+                 << " rawRoll=" << (raw_roll ? fixed3(*raw_roll) : "NA")
+                 << " roll=" << (roll ? fixed3(*roll) : "NA")
                  << " yawZ=" << fixed3(telemetry.yaw_rate_z)
                  << " angY=" << (telemetry.yaw_rate_y ? fixed3(*telemetry.yaw_rate_y) : "NA")
+                 << " p=" << (telemetry.roll_rate_x ? fixed3(*telemetry.roll_rate_x) : "NA")
                  << " yawCtl=" << fixed3(control_yaw_rate(telemetry))
                  << " yawSrc=" << active_cfg.yaw_rate_source
                  << " yawAccZ=" << (telemetry.yaw_acceleration_z ? fixed3(*telemetry.yaw_acceleration_z) : "NA")
@@ -1849,6 +1990,7 @@ int run_tune_session(AppConfig cfg, bool auto_apply, bool drive_collective) {
                  << " cff=" << fixed3(result.collective_feedforward)
                  << " aAssist=" << fixed3(result.yaw_acceleration_assist)
                  << " final=" << fixed3(result.final_rudder)
+                 << " finalRoll=" << fixed3(roll.value_or(0.0))
                  << " mode=" << result.reason;
             runtime.logger.info(line.str());
             next_log = now + std::chrono::milliseconds(250);
@@ -1894,6 +2036,9 @@ int run_tune_session(AppConfig cfg, bool auto_apply, bool drive_collective) {
         }
     }
     output.set_axis(0.0);
+    if (active_cfg.ah64_roll_enabled > 0.5) {
+        output.set_axis(active_cfg.ah64_roll_output_axis_name, 0.0);
+    }
     log_tune_report(runtime.logger, auto_apply ? "Auto tune final" : "Tune final", total_analyzer.report());
     runtime.logger.info("Final active tune config: " + tune_config_summary(active_cfg));
     runtime.logger.info(std::string("Stopped ") + (auto_apply ? "auto tune" : "tune session"));
@@ -2009,12 +2154,17 @@ int run_calibration(AppConfig cfg) {
 int run_test_output(AppConfig cfg) {
     Logger logger(cfg.log_path);
     const bool f14_mode = cfg.control_mode == "f14_roll_assist";
+    const bool ah64_roll_mode = !f14_mode && cfg.ah64_roll_enabled > 0.5;
     const std::string primary_axis = f14_mode ? cfg.f14_output_rudder_axis_name : cfg.axis_name;
     windows::VJoyDevice output(cfg.output_vjoy_id, primary_axis);
     if (f14_mode) {
         logger.info("Sweeping vJoy #" + std::to_string(cfg.output_vjoy_id) +
                     " F-14 axes roll=" + cfg.f14_output_roll_axis_name +
                     " rudder=" + cfg.f14_output_rudder_axis_name + " for diagnostics");
+    } else if (ah64_roll_mode) {
+        logger.info("Sweeping vJoy #" + std::to_string(cfg.output_vjoy_id) +
+                    " AH-64D axes rudder=" + cfg.axis_name +
+                    " roll=" + cfg.ah64_roll_output_axis_name + " for diagnostics");
     } else {
         logger.info("Sweeping vJoy #" + std::to_string(cfg.output_vjoy_id) + " axis " + cfg.axis_name + " for diagnostics");
     }
@@ -2030,6 +2180,9 @@ int run_test_output(AppConfig cfg) {
         if (f14_mode) {
             output.set_axis(cfg.f14_output_roll_axis_name, value);
             output.set_axis(cfg.f14_output_rudder_axis_name, -value);
+        } else if (ah64_roll_mode) {
+            output.set_axis(value);
+            output.set_axis(cfg.ah64_roll_output_axis_name, -value);
         } else {
             output.set_axis(value);
         }
@@ -2037,6 +2190,8 @@ int run_test_output(AppConfig cfg) {
         if (now >= next_log) {
             if (f14_mode) {
                 logger.info("test_output roll=" + fixed3(value) + " rudder=" + fixed3(-value));
+            } else if (ah64_roll_mode) {
+                logger.info("test_output rudder=" + fixed3(value) + " roll=" + fixed3(-value));
             } else {
                 logger.info("test_output final=" + fixed3(value));
             }
@@ -2048,6 +2203,9 @@ int run_test_output(AppConfig cfg) {
     if (f14_mode) {
         output.set_axis(cfg.f14_output_roll_axis_name, 0.0);
         output.set_axis(cfg.f14_output_rudder_axis_name, 0.0);
+    } else if (ah64_roll_mode) {
+        output.set_axis(0.0);
+        output.set_axis(cfg.ah64_roll_output_axis_name, 0.0);
     } else {
         output.set_axis(0.0);
     }

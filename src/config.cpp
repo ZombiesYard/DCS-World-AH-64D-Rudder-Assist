@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <fstream>
 #include <sstream>
 #include <stdexcept>
@@ -19,6 +20,17 @@ std::string trim(std::string value) {
 
 bool starts_with(std::string_view text, std::string_view prefix) {
     return text.size() >= prefix.size() && text.substr(0, prefix.size()) == prefix;
+}
+
+std::string uppercase(std::string value) {
+    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char ch) {
+        return static_cast<char>(std::toupper(ch));
+    });
+    return value;
+}
+
+bool equals_case_insensitive(const std::string& lhs, const std::string& rhs) {
+    return uppercase(lhs) == uppercase(rhs);
 }
 
 int parse_int(const std::string& value, const std::string& key) {
@@ -88,6 +100,62 @@ void apply_key(AppConfig& cfg, const std::string& key, const std::string& value)
     }
     if (key == "rpm_power_gain") {
         cfg.rpm_power_gain = parse_double(value, key);
+        return;
+    }
+    if (key == "ah64_roll_enabled") {
+        cfg.ah64_roll_enabled = parse_double(value, key);
+        return;
+    }
+    if (key == "ah64_roll_input_id") {
+        cfg.ah64_roll_input_id = parse_int(value, key);
+        return;
+    }
+    if (key == "ah64_roll_device_name_contains") {
+        cfg.ah64_roll_device_name_contains = value;
+        return;
+    }
+    if (key == "ah64_roll_axis_name") {
+        cfg.ah64_roll_axis_name = value;
+        return;
+    }
+    if (key == "ah64_roll_output_axis_name") {
+        cfg.ah64_roll_output_axis_name = value;
+        return;
+    }
+    if (key == "ah64_roll_input_center") {
+        cfg.ah64_roll_input_center = parse_double(value, key);
+        return;
+    }
+    if (key == "ah64_roll_input_deadzone") {
+        cfg.ah64_roll_input_deadzone = parse_double(value, key);
+        return;
+    }
+    if (key == "ah64_roll_input_scale") {
+        cfg.ah64_roll_input_scale = parse_double(value, key);
+        return;
+    }
+    if (key == "ah64_roll_override_threshold") {
+        cfg.ah64_roll_override_threshold = parse_double(value, key);
+        return;
+    }
+    if (key == "ah64_roll_counter_sign") {
+        cfg.ah64_roll_counter_sign = parse_double(value, key);
+        return;
+    }
+    if (key == "ah64_roll_counter_gain") {
+        cfg.ah64_roll_counter_gain = parse_double(value, key);
+        return;
+    }
+    if (key == "ah64_roll_counter_max") {
+        cfg.ah64_roll_counter_max = parse_double(value, key);
+        return;
+    }
+    if (key == "ah64_roll_counter_deadband") {
+        cfg.ah64_roll_counter_deadband = parse_double(value, key);
+        return;
+    }
+    if (key == "ah64_roll_counter_fade_time") {
+        cfg.ah64_roll_counter_fade_time = parse_double(value, key);
         return;
     }
 
@@ -249,6 +317,37 @@ void validate(const AppConfig& cfg) {
     }
     if (cfg.rudder_input_scale <= 0.0 || cfg.rudder_input_scale > 4.0) {
         throw std::runtime_error("rudder_input_scale must be in (0, 4]");
+    }
+    if (cfg.ah64_roll_enabled < 0.0 || cfg.ah64_roll_enabled > 1.0) {
+        throw std::runtime_error("ah64_roll_enabled must be in [0, 1]");
+    }
+    if (cfg.ah64_roll_input_id <= 0) throw std::runtime_error("ah64_roll_input_id must be positive");
+    if (cfg.ah64_roll_input_center < -0.95 || cfg.ah64_roll_input_center > 0.95) {
+        throw std::runtime_error("ah64_roll_input_center must be in [-0.95, 0.95]");
+    }
+    if (cfg.ah64_roll_input_deadzone < 0.0 || cfg.ah64_roll_input_deadzone > 0.95) {
+        throw std::runtime_error("ah64_roll_input_deadzone must be in [0, 0.95]");
+    }
+    if (std::abs(cfg.ah64_roll_input_scale) <= 0.000001 || std::abs(cfg.ah64_roll_input_scale) > 4.0) {
+        throw std::runtime_error("ah64_roll_input_scale absolute value must be in (0, 4]");
+    }
+    if (cfg.ah64_roll_override_threshold < 0.0 || cfg.ah64_roll_override_threshold > 1.0) {
+        throw std::runtime_error("ah64_roll_override_threshold must be in [0, 1]");
+    }
+    if (cfg.ah64_roll_counter_gain < 0.0 || cfg.ah64_roll_counter_gain > 2.0) {
+        throw std::runtime_error("ah64_roll_counter_gain must be in [0, 2]");
+    }
+    if (cfg.ah64_roll_counter_max < 0.0 || cfg.ah64_roll_counter_max > 1.0) {
+        throw std::runtime_error("ah64_roll_counter_max must be in [0, 1]");
+    }
+    if (cfg.ah64_roll_counter_deadband < 0.0 || cfg.ah64_roll_counter_deadband > 1.0) {
+        throw std::runtime_error("ah64_roll_counter_deadband must be in [0, 1]");
+    }
+    if (cfg.ah64_roll_counter_fade_time < 0.0) {
+        throw std::runtime_error("ah64_roll_counter_fade_time must be non-negative");
+    }
+    if (cfg.ah64_roll_enabled > 0.5 && equals_case_insensitive(cfg.ah64_roll_output_axis_name, cfg.axis_name)) {
+        throw std::runtime_error("ah64_roll_output_axis_name must differ from axis_name when ah64_roll_enabled=1");
     }
     if (cfg.collective_input_id <= 0) throw std::runtime_error("collective_input_id must be positive");
     if (cfg.loop_hz < 20 || cfg.loop_hz > 500) throw std::runtime_error("loop_hz must be between 20 and 500");
@@ -507,6 +606,22 @@ void write_default_config(const std::filesystem::path& path) {
         << "rudder_input_center=" << cfg.rudder_input_center << "\n"
         << "rudder_input_deadzone=" << cfg.rudder_input_deadzone << "\n"
         << "rudder_input_scale=" << cfg.rudder_input_scale << "\n\n"
+        << "# AH-64D cyclic roll passthrough/counter-trim.\n"
+        << "# Bind AH-64D cyclic roll in DCS to output_vjoy_id/ah64_roll_output_axis_name only.\n"
+        << "ah64_roll_enabled=" << cfg.ah64_roll_enabled << "\n"
+        << "ah64_roll_input_id=" << cfg.ah64_roll_input_id << "\n"
+        << "ah64_roll_device_name_contains=" << cfg.ah64_roll_device_name_contains << "\n"
+        << "ah64_roll_axis_name=" << cfg.ah64_roll_axis_name << "\n"
+        << "ah64_roll_output_axis_name=" << cfg.ah64_roll_output_axis_name << "\n"
+        << "ah64_roll_input_center=" << cfg.ah64_roll_input_center << "\n"
+        << "ah64_roll_input_deadzone=" << cfg.ah64_roll_input_deadzone << "\n"
+        << "ah64_roll_input_scale=" << cfg.ah64_roll_input_scale << "\n"
+        << "ah64_roll_override_threshold=" << cfg.ah64_roll_override_threshold << "\n"
+        << "ah64_roll_counter_sign=" << cfg.ah64_roll_counter_sign << "\n"
+        << "ah64_roll_counter_gain=" << cfg.ah64_roll_counter_gain << "\n"
+        << "ah64_roll_counter_max=" << cfg.ah64_roll_counter_max << "\n"
+        << "ah64_roll_counter_deadband=" << cfg.ah64_roll_counter_deadband << "\n"
+        << "ah64_roll_counter_fade_time=" << cfg.ah64_roll_counter_fade_time << "\n\n"
         << "control_mode=" << cfg.control_mode << "\n"
         << "assist_sign=" << cfg.assist_sign << "\n"
         << "yaw_response_sign=" << cfg.yaw_response_sign << "\n"
