@@ -2,6 +2,8 @@
 
 Windows C++ external control assist for DCS. The AH-64D mode listens to telemetry and writes one final rudder axis to a separate vJoy device. The F-14 mode adds a high-AoA roll-to-rudder mixer that can also reduce roll-axis output.
 
+Automatically stabilizes heading when Apache rotor power changes (arcade mode ;p). Automatically rudders when rolling under high AoA conditions in F14.
+
 ## Input Chain
 
 Use this topology:
