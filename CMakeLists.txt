@@ -16,6 +16,7 @@ add_library(autorudder_core
     src/logger.cpp
     src/power_feedforward.cpp
     src/retro_music_guard.cpp
+    src/retro_xm_player.cpp
     src/retro_toggle.cpp
     src/rudder_input.cpp
     src/tune_session.cpp

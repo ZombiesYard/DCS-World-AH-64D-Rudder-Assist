@@ -8,6 +8,7 @@
 #include "logger.h"
 #include "power_feedforward.h"
 #include "retro_music_guard.h"
+#include "retro_xm_player.h"
 #include "retro_toggle.h"
 #include "rudder_input.h"
 #include "tune_session.h"
@@ -34,6 +35,7 @@
 #include <mutex>
 #include <optional>
 #include <sstream>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -257,8 +259,22 @@ bool start_embedded_music() {
     if (!music) {
         return false;
     }
+    static std::vector<std::uint8_t> rendered_music;
+    static bool attempted_render = false;
+    if (!attempted_render) {
+        attempted_render = true;
+        try {
+            const auto* bytes = static_cast<const std::uint8_t*>(music->first);
+            rendered_music = render_xm_to_wav(std::span<const std::uint8_t>(bytes, music->second), 22050, 300);
+        } catch (const std::exception&) {
+            rendered_music.clear();
+        }
+    }
+    if (rendered_music.empty()) {
+        return false;
+    }
     return PlaySoundA(
-        static_cast<LPCSTR>(music->first),
+        reinterpret_cast<LPCSTR>(rendered_music.data()),
         nullptr,
         SND_MEMORY | SND_ASYNC | SND_LOOP | SND_NODEFAULT) == TRUE;
 }
@@ -292,12 +308,22 @@ enum RetroButtonId {
     kRetroAh64 = 1001,
     kRetroF14 = 1002,
     kRetroExit = 1003,
+    kRetroSfx = 1004,
 };
 
 constexpr int kRetroWidth = 440;
 constexpr int kRetroHeight = 280;
 constexpr UINT kRetroWorkerDone = WM_APP + 1;
 constexpr UINT_PTR kRetroTickTimer = 1;
+constexpr COLORREF kRetroBg = RGB(15, 12, 34);
+constexpr COLORREF kRetroPanel = RGB(27, 22, 58);
+constexpr COLORREF kRetroPanelHover = RGB(47, 34, 92);
+constexpr COLORREF kRetroCyan = RGB(96, 245, 255);
+constexpr COLORREF kRetroPurple = RGB(166, 113, 255);
+constexpr COLORREF kRetroPink = RGB(255, 96, 202);
+constexpr COLORREF kRetroMuted = RGB(142, 134, 180);
+constexpr COLORREF kRetroDim = RGB(88, 80, 128);
+constexpr COLORREF kRetroAmber = RGB(255, 213, 104);
 
 int run_normal(CliOptions options, AppConfig cfg);
 
@@ -306,7 +332,8 @@ struct RetroGuiState {
     bool music_started = false;
     RECT ah64_rect{230, 62, 420, 88};
     RECT f14_rect{230, 106, 420, 132};
-    RECT exit_rect{390, 10, 430, 26};
+    RECT sfx_rect{330, 10, 396, 26};
+    RECT exit_rect{400, 10, 434, 26};
     int hover_id = 0;
     bool tracking_mouse = false;
     HFONT mono_font = nullptr;
@@ -379,6 +406,9 @@ bool point_in_rect(const RECT& rect, LPARAM lparam) {
 int hit_test_retro(const RetroGuiState& state, LPARAM lparam) {
     if (point_in_rect(state.exit_rect, lparam)) {
         return kRetroExit;
+    }
+    if (point_in_rect(state.sfx_rect, lparam)) {
+        return kRetroSfx;
     }
     if (point_in_rect(state.ah64_rect, lparam)) {
         return kRetroAh64;
@@ -601,6 +631,30 @@ void start_retro_profile(HWND hwnd, RetroGuiState& state, int id) {
     });
 }
 
+void toggle_retro_sfx(HWND hwnd, RetroGuiState& state) {
+    bool profile_active = false;
+    {
+        std::lock_guard lock(state.mutex);
+        profile_active = state.toggle.active();
+    }
+    const bool dcs_running = process_running(L"DCS.exe");
+    const RetroSfxAction action = retro_sfx_click(state.music_started, dcs_running, profile_active);
+    if (action == RetroSfxAction::Stop) {
+        stop_retro_music(state, L"SFX OFF: CLICKED");
+    } else if (action == RetroSfxAction::Start) {
+        const bool started = start_embedded_music();
+        {
+            std::lock_guard lock(state.mutex);
+            state.music_started = started;
+            state.run_status = started ? L"SFX ON: XM MODULE" : L"SFX OFF: XM PLAYBACK FAILED";
+        }
+    } else {
+        std::lock_guard lock(state.mutex);
+        state.run_status = dcs_running ? L"SFX LOCKED: DCS RUNNING" : L"SFX LOCKED: PROFILE ACTIVE";
+    }
+    InvalidateRect(hwnd, nullptr, FALSE);
+}
+
 void paint_retro_gui(HWND hwnd, RetroGuiState& state) {
     PAINTSTRUCT ps{};
     HDC hdc = BeginPaint(hwnd, &ps);
@@ -620,48 +674,53 @@ void paint_retro_gui(HWND hwnd, RetroGuiState& state) {
         stopping = active && run_status.rfind(L"STOPPING:", 0) == 0;
     }
 
-    HBRUSH background = CreateSolidBrush(RGB(30, 31, 28));
+    HBRUSH background = CreateSolidBrush(kRetroBg);
     FillRect(hdc, &client, background);
     DeleteObject(background);
     SetBkMode(hdc, TRANSPARENT);
 
     SelectObject(hdc, state.mono_font);
-    draw_text_line(hdc, 8, 10, RGB(78, 255, 158), L"DCS FCS  V1.0  Trainer");
-    draw_text_line(hdc, 350, 10, RGB(115, 125, 120), state.music_started ? L"SFX ON" : L"SFX OFF");
-    draw_text_line(hdc, 395, 10, state.hover_id == kRetroExit ? RGB(255, 120, 120) : RGB(78, 255, 158), L"EXIT");
-    draw_dotted_hline(hdc, 30, RGB(150, 150, 142));
+    draw_text_line(hdc, 8, 10, kRetroCyan, L"rudder helper");
+    if (state.hover_id == kRetroSfx) {
+        fill_rect_color(hdc, state.sfx_rect, kRetroPanelHover);
+    }
+    draw_rect_outline(hdc, state.sfx_rect, state.hover_id == kRetroSfx ? kRetroPink : kRetroDim);
+    draw_text_line(hdc, 336, 10, state.hover_id == kRetroSfx ? kRetroPink : kRetroMuted,
+        state.music_started ? L"SFX ON" : L"SFX OFF");
+    draw_text_line(hdc, 402, 10, state.hover_id == kRetroExit ? kRetroPink : kRetroCyan, L"EXIT");
+    draw_dotted_hline(hdc, 30, kRetroPurple);
 
     RECT art_box{50, 50, 182, 182};
-    HBRUSH art_fill = CreateSolidBrush(RGB(18, 38, 42));
+    HBRUSH art_fill = CreateSolidBrush(RGB(22, 18, 52));
     FillRect(hdc, &art_box, art_fill);
     DeleteObject(art_fill);
-    draw_rect_outline(hdc, art_box, RGB(58, 82, 80));
+    draw_rect_outline(hdc, art_box, RGB(76, 68, 140));
     SelectObject(hdc, state.mono_font);
-    draw_text_line(hdc, 63, 60, RGB(102, 240, 255), L"  ___   ___ ");
-    draw_text_line(hdc, 63, 78, RGB(102, 240, 255), L" / _ \\ / __|");
-    draw_text_line(hdc, 63, 96, RGB(78, 255, 158), L"| (_) | (__ ");
-    draw_text_line(hdc, 63, 114, RGB(78, 255, 158), L" \\___/ \\___|");
-    draw_text_line(hdc, 63, 136, RGB(255, 232, 112), L" AH64  F14 ");
-    draw_text_line(hdc, 63, 154, RGB(230, 230, 220), L" vJoy MIXER");
+    draw_text_line(hdc, 63, 60, kRetroCyan, L"  ___   ___ ");
+    draw_text_line(hdc, 63, 78, kRetroCyan, L" / _ \\ / __|");
+    draw_text_line(hdc, 63, 96, kRetroPurple, L"| (_) | (__ ");
+    draw_text_line(hdc, 63, 114, kRetroPurple, L" \\___/ \\___|");
+    draw_text_line(hdc, 63, 136, kRetroAmber, L" AH64  F14 ");
+    draw_text_line(hdc, 63, 154, RGB(214, 206, 255), L" vJoy MIXER");
 
     SelectObject(hdc, state.mono_font);
     if (state.hover_id == kRetroAh64) {
-        fill_rect_color(hdc, state.ah64_rect, RGB(42, 58, 48));
+        fill_rect_color(hdc, state.ah64_rect, kRetroPanelHover);
     }
     if (state.hover_id == kRetroF14) {
-        fill_rect_color(hdc, state.f14_rect, RGB(42, 58, 48));
+        fill_rect_color(hdc, state.f14_rect, kRetroPanelHover);
     }
-    draw_rect_outline(hdc, state.ah64_rect, state.hover_id == kRetroAh64 ? RGB(118, 255, 168) : RGB(62, 120, 92));
-    draw_rect_outline(hdc, state.f14_rect, state.hover_id == kRetroF14 ? RGB(118, 255, 168) : RGB(62, 120, 92));
-    draw_text_line(hdc, 236, 68, state.hover_id == kRetroAh64 ? RGB(150, 255, 180) : RGB(96, 207, 150),
+    draw_rect_outline(hdc, state.ah64_rect, state.hover_id == kRetroAh64 ? kRetroPink : kRetroDim);
+    draw_rect_outline(hdc, state.f14_rect, state.hover_id == kRetroF14 ? kRetroPink : kRetroDim);
+    draw_text_line(hdc, 236, 68, state.hover_id == kRetroAh64 ? kRetroPink : kRetroCyan,
         active && active_profile == L"AH-64D" ? L"ON/OFF - AH-64D" : L"CLICK  - AH-64D");
-    draw_text_line(hdc, 236, 112, state.hover_id == kRetroF14 ? RGB(150, 255, 180) : RGB(96, 207, 150),
+    draw_text_line(hdc, 236, 112, state.hover_id == kRetroF14 ? kRetroPink : kRetroCyan,
         active && active_profile == L"F-14" ? L"ON/OFF - F-14" : L"CLICK  - F-14");
-    draw_text_line(hdc, 230, 150, RGB(116, 166, 140), L"AH-64D: COL2YAW / Heading Hold");
-    draw_text_line(hdc, 230, 172, RGB(116, 166, 140), L"F-14: Roll Washout / Mixer");
-    draw_text_line(hdc, 230, 198, active ? RGB(118, 255, 168) : RGB(130, 130, 125), trim_to_width(run_status, 27));
+    draw_text_line(hdc, 230, 150, kRetroMuted, L"AH-64D: COL2YAW / Heading Hold");
+    draw_text_line(hdc, 230, 172, kRetroMuted, L"F-14: Roll Washout / Mixer");
+    draw_text_line(hdc, 230, 198, active ? kRetroPink : kRetroMuted, trim_to_width(run_status, 27));
 
-    draw_dotted_hline(hdc, 232, RGB(150, 150, 142));
+    draw_dotted_hline(hdc, 232, kRetroPurple);
     const wchar_t* status = active ? L"INTERACTION: CLICK ACTIVE PROFILE TO STOP" : L"INTERACTION: CLICK HOTSPOTS ENABLED";
     if (state.hover_id == kRetroAh64) {
         if (stopping) {
@@ -685,16 +744,22 @@ void paint_retro_gui(HWND hwnd, RetroGuiState& state) {
         }
     } else if (state.hover_id == kRetroExit) {
         status = L"READY: CLICK TO EXIT";
+    } else if (state.hover_id == kRetroSfx) {
+        status = state.music_started ? L"READY: CLICK SFX TO OFF" : L"READY: CLICK SFX TO ON";
     }
-    draw_text_line(hdc, 72, 240, RGB(120, 125, 120), L"-- DCS FCS Presents --");
-    draw_dotted_hline(hdc, 255, RGB(150, 150, 142));
-    draw_text_line(hdc, 8, 258, RGB(130, 130, 125), trim_to_width(last_log, 52));
-    draw_text_line(hdc, 8, 270, active ? RGB(118, 255, 168) : RGB(130, 130, 125), trim_to_width(status, 52));
+    draw_text_line(hdc, 60, 240, kRetroMuted, L"-- zombiesyard presents --");
+    draw_dotted_hline(hdc, 255, kRetroPurple);
+    draw_text_line(hdc, 8, 258, kRetroMuted, trim_to_width(last_log, 52));
+    draw_text_line(hdc, 8, 270, active ? kRetroPink : kRetroMuted, trim_to_width(status, 52));
 
     EndPaint(hwnd, &ps);
 }
 
 void select_retro_option(HWND hwnd, RetroGuiState& state, int id) {
+    if (id == kRetroSfx) {
+        toggle_retro_sfx(hwnd, state);
+        return;
+    }
     start_retro_profile(hwnd, state, id);
 }
 
@@ -717,6 +782,7 @@ LRESULT CALLBACK retro_wnd_proc(HWND hwnd, UINT message, WPARAM wparam, LPARAM l
             POINT point{GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam)};
             ScreenToClient(hwnd, &point);
             if (PtInRect(&state->exit_rect, point) ||
+                PtInRect(&state->sfx_rect, point) ||
                 PtInRect(&state->ah64_rect, point) ||
                 PtInRect(&state->f14_rect, point)) {
                 return HTCLIENT;

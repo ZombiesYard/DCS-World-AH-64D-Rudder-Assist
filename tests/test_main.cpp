@@ -7,6 +7,7 @@
 #include "power_feedforward.h"
 #include "retro_toggle.h"
 #include "retro_music_guard.h"
+#include "retro_xm_player.h"
 #include "rudder_input.h"
 #include "tune_session.h"
 #include "yaw_damper.h"
@@ -38,6 +39,33 @@ void expect_near(double actual, double expected, double epsilon, const std::stri
         ++failures;
         std::cerr << "FAIL: " << message << " actual=" << actual << " expected=" << expected << '\n';
     }
+}
+
+std::filesystem::path find_test_file(const std::filesystem::path& relative_path) {
+    for (const auto& base : {
+             std::filesystem::current_path(),
+             std::filesystem::current_path().parent_path(),
+             std::filesystem::current_path().parent_path().parent_path(),
+         }) {
+        const auto path = base / relative_path;
+        if (std::filesystem::exists(path)) {
+            return path;
+        }
+    }
+    throw std::runtime_error("test file not found: " + relative_path.string());
+}
+
+std::vector<std::uint8_t> read_binary_file(const std::filesystem::path& path) {
+    std::ifstream input(path, std::ios::binary);
+    if (!input) {
+        throw std::runtime_error("failed to open " + path.string());
+    }
+    input.seekg(0, std::ios::end);
+    const auto size = input.tellg();
+    input.seekg(0, std::ios::beg);
+    std::vector<std::uint8_t> bytes(static_cast<std::size_t>(size));
+    input.read(reinterpret_cast<char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+    return bytes;
 }
 
 void test_protocol_parser_applies_writes() {
@@ -1729,6 +1757,43 @@ void test_retro_music_guard_stops_for_dcs_and_profile_start() {
     expect_true(action == autorudder::RetroMusicAction::None, "profile start does nothing when music is already off");
 }
 
+void test_retro_sfx_click_toggles_and_blocks_restart() {
+    auto action = autorudder::retro_sfx_click(true, false, false);
+    expect_true(action == autorudder::RetroSfxAction::Stop, "SFX ON click stops music");
+
+    action = autorudder::retro_sfx_click(false, false, false);
+    expect_true(action == autorudder::RetroSfxAction::Start, "SFX OFF click starts music when idle");
+
+    action = autorudder::retro_sfx_click(false, true, false);
+    expect_true(action == autorudder::RetroSfxAction::None, "SFX OFF click stays off while DCS is running");
+
+    action = autorudder::retro_sfx_click(false, false, true);
+    expect_true(action == autorudder::RetroSfxAction::None, "SFX OFF click stays off while a profile is active");
+}
+
+void test_retro_xm_parser_loads_user_module() {
+    const auto path = find_test_file("src/[krut]- fotboll !!!.xm");
+    const auto bytes = read_binary_file(path);
+
+    const auto info = autorudder::parse_xm_module_info(bytes);
+    expect_true(info.title == "[KRUT]- Fotboll !!!", "XM parser reads module title");
+    expect_true(info.channels == 4, "XM parser reads channel count");
+    expect_true(info.patterns == 43, "XM parser reads pattern count");
+    expect_true(info.instruments == 31, "XM parser reads instrument count");
+    expect_true(info.default_tempo == 4, "XM parser reads default tempo");
+    expect_true(info.default_bpm == 135, "XM parser reads default BPM");
+}
+
+void test_retro_xm_renderer_outputs_wav_memory() {
+    const auto path = find_test_file("src/[krut]- fotboll !!!.xm");
+    const auto bytes = read_binary_file(path);
+
+    const auto wav = autorudder::render_xm_to_wav(bytes, 8000, 8);
+    expect_true(wav.size() > 44, "XM renderer produces WAV bytes");
+    expect_true(std::string(reinterpret_cast<const char*>(wav.data()), 4) == "RIFF", "XM renderer writes RIFF header");
+    expect_true(std::string(reinterpret_cast<const char*>(wav.data() + 8), 4) == "WAVE", "XM renderer writes WAVE header");
+}
+
 void test_rudder_input_calibration_recenters_offset_vjoy_axis() {
     autorudder::AppConfig cfg;
     cfg.rudder_input_center = -0.45;
@@ -1807,6 +1872,9 @@ int main() {
     test_f14_reversal_guard_reduces_roll_to_rudder_gain();
     test_retro_toggle_debounces_stop_before_restart();
     test_retro_music_guard_stops_for_dcs_and_profile_start();
+    test_retro_sfx_click_toggles_and_blocks_restart();
+    test_retro_xm_parser_loads_user_module();
+    test_retro_xm_renderer_outputs_wav_memory();
     test_rudder_input_calibration_recenters_offset_vjoy_axis();
 
     if (failures != 0) {

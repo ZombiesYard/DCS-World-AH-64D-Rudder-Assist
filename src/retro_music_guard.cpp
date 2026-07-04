@@ -2,6 +2,16 @@
 
 namespace autorudder {
 
+RetroSfxAction retro_sfx_click(bool music_playing, bool dcs_running, bool profile_active) {
+    if (music_playing) {
+        return RetroSfxAction::Stop;
+    }
+    if (dcs_running || profile_active) {
+        return RetroSfxAction::None;
+    }
+    return RetroSfxAction::Start;
+}
+
 RetroMusicAction RetroMusicGuard::update(bool music_playing, bool dcs_running) {
     if (music_playing && dcs_running && !stopped_for_dcs_) {
         stopped_for_dcs_ = true;
