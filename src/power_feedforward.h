@@ -14,7 +14,7 @@ struct PowerFeedforwardConfig {
     double rpm_power_gain = 0.40;
     double collective_lead_gain = 0.0;
     double collective_lead_invert = 0.0;
-    double collective_lead_deadband = 0.02;
+    double collective_lead_deadband = 0.0;
 };
 
 struct PowerFeedforwardInput {
