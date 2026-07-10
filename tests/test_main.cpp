@@ -289,6 +289,32 @@ void test_power_feedforward_collective_lead_only_increases_proxy() {
     expect_near(*output.value, 0.40, 0.001, "collective lead does not reduce engine proxy");
 }
 
+void test_power_feedforward_small_collective_lead_is_not_dropped_by_default() {
+    autorudder::PowerFeedforwardConfig cfg;
+    cfg.source = "fuel_rpm";
+    cfg.fuel_flow_min = 0.050;
+    cfg.fuel_flow_max = 0.150;
+    cfg.rpm_power_gain = 0.0;
+    cfg.collective_lead_gain = 0.35;
+    cfg.collective_lead_invert = 1.0;
+
+    autorudder::PowerFeedforwardInput input;
+    input.fuel_flow = 0.100;
+    input.rpm = 100.0;
+    input.collective = 0.490;
+
+    auto output = autorudder::compute_power_feedforward_input(cfg, input);
+
+    expect_true(output.source == "fuel_rpm_collective_lead", "small inverted collective increase applies physical lead by default");
+    expect_true(output.value.has_value(), "small collective lead keeps a power value");
+    expect_near(*output.value, 0.5035, 0.0001, "small collective increase is preserved in the power proxy");
+
+    input.collective = 0.510;
+    output = autorudder::compute_power_feedforward_input(cfg, input);
+    expect_true(output.source == "fuel_rpm", "small inverted collective decrease does not apply upward-only lead");
+    expect_near(*output.value, 0.5000, 0.0001, "upward-only lead does not reduce the power proxy");
+}
+
 autorudder::AppConfig test_config() {
     autorudder::AppConfig cfg;
     cfg.control_mode = "yaw_damper";
@@ -1834,6 +1860,7 @@ int main() {
     test_power_feedforward_fuel_rpm_adds_rpm_drop();
     test_power_feedforward_fuel_rpm_requires_fuel();
     test_power_feedforward_collective_lead_only_increases_proxy();
+    test_power_feedforward_small_collective_lead_is_not_dropped_by_default();
     test_yaw_damper_assists_centered_pedals();
     test_yaw_damper_user_override();
     test_yaw_damper_stale_or_wrong_aircraft_passes_through();
